@@ -18,6 +18,11 @@ export interface Config {
   feishuAppSecret?: string;
   feishuDomain?: string;
   feishuAllowedUsers?: string[];
+  feishuGroupTriggerMode?: 'all' | 'mention';
+  feishuGroupContextMaxMessages?: number;
+  feishuGroupContextMaxAgeMinutes?: number;
+  feishuGroupContextMaxChars?: number;
+  feishuGroupContextPerMessageMaxChars?: number;
   // Discord
   discordBotToken?: string;
   discordAllowedUsers?: string[];
@@ -77,6 +82,18 @@ function normalizeEffort(value: string | undefined): string | undefined {
     : undefined;
 }
 
+function normalizeFeishuGroupTriggerMode(value: string | undefined): 'all' | 'mention' | undefined {
+  if (!value) return undefined;
+  const mode = value.trim().toLowerCase();
+  return mode === 'all' || mode === 'mention' ? mode : undefined;
+}
+
+function optionalPositiveNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : undefined;
+}
+
 export function loadConfig(): Config {
   let env = new Map<string, string>();
   try {
@@ -103,6 +120,11 @@ export function loadConfig(): Config {
     feishuAppSecret: env.get("CTI_FEISHU_APP_SECRET") || undefined,
     feishuDomain: env.get("CTI_FEISHU_DOMAIN") || undefined,
     feishuAllowedUsers: splitCsv(env.get("CTI_FEISHU_ALLOWED_USERS")),
+    feishuGroupTriggerMode: normalizeFeishuGroupTriggerMode(env.get("CTI_FEISHU_GROUP_TRIGGER_MODE")),
+    feishuGroupContextMaxMessages: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES")),
+    feishuGroupContextMaxAgeMinutes: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES")),
+    feishuGroupContextMaxChars: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS")),
+    feishuGroupContextPerMessageMaxChars: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS")),
     discordBotToken: env.get("CTI_DISCORD_BOT_TOKEN") || undefined,
     discordAllowedUsers: splitCsv(env.get("CTI_DISCORD_ALLOWED_USERS")),
     discordAllowedChannels: splitCsv(
@@ -156,6 +178,15 @@ export function saveConfig(config: Config): void {
     "CTI_FEISHU_ALLOWED_USERS",
     config.feishuAllowedUsers?.join(",")
   );
+  out += formatEnvLine("CTI_FEISHU_GROUP_TRIGGER_MODE", config.feishuGroupTriggerMode);
+  if (config.feishuGroupContextMaxMessages !== undefined)
+    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES", String(config.feishuGroupContextMaxMessages));
+  if (config.feishuGroupContextMaxAgeMinutes !== undefined)
+    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES", String(config.feishuGroupContextMaxAgeMinutes));
+  if (config.feishuGroupContextMaxChars !== undefined)
+    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS", String(config.feishuGroupContextMaxChars));
+  if (config.feishuGroupContextPerMessageMaxChars !== undefined)
+    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS", String(config.feishuGroupContextPerMessageMaxChars));
   out += formatEnvLine("CTI_DISCORD_BOT_TOKEN", config.discordBotToken);
   out += formatEnvLine(
     "CTI_DISCORD_ALLOWED_USERS",
@@ -247,6 +278,16 @@ export function configToSettings(config: Config): Map<string, string> {
   if (config.feishuDomain) m.set("bridge_feishu_domain", config.feishuDomain);
   if (config.feishuAllowedUsers)
     m.set("bridge_feishu_allowed_users", config.feishuAllowedUsers.join(","));
+  if (config.feishuGroupTriggerMode)
+    m.set("bridge_feishu_group_trigger_mode", config.feishuGroupTriggerMode);
+  if (config.feishuGroupContextMaxMessages !== undefined)
+    m.set("bridge_feishu_group_context_max_messages", String(config.feishuGroupContextMaxMessages));
+  if (config.feishuGroupContextMaxAgeMinutes !== undefined)
+    m.set("bridge_feishu_group_context_max_age_minutes", String(config.feishuGroupContextMaxAgeMinutes));
+  if (config.feishuGroupContextMaxChars !== undefined)
+    m.set("bridge_feishu_group_context_max_chars", String(config.feishuGroupContextMaxChars));
+  if (config.feishuGroupContextPerMessageMaxChars !== undefined)
+    m.set("bridge_feishu_group_context_per_message_max_chars", String(config.feishuGroupContextPerMessageMaxChars));
 
   // ── QQ ──
   // Upstream keys: bridge_qq_enabled, bridge_qq_app_id, bridge_qq_app_secret,
