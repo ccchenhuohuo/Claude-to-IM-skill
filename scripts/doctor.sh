@@ -286,7 +286,7 @@ fi
 
 # --- config.env permissions ---
 if [ -f "$CONFIG_FILE" ]; then
-  PERMS=$(stat -f "%Lp" "$CONFIG_FILE" 2>/dev/null || stat -c "%a" "$CONFIG_FILE" 2>/dev/null || echo "unknown")
+  PERMS=$(stat -c "%a" "$CONFIG_FILE" 2>/dev/null || stat -f "%Lp" "$CONFIG_FILE" 2>/dev/null || echo "unknown")
   if [ "$PERMS" = "600" ]; then
     check "config.env permissions are 600" 0
   else

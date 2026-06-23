@@ -76,6 +76,16 @@ const API_AUTH_USER_MESSAGE =
   'API credential error. Check your ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN in config.env, ' +
   'or verify your organization has access to the requested model.';
 
+function configuredEffort(): string | undefined {
+  const effort = process.env.CTI_DEFAULT_EFFORT?.trim();
+  if (!effort) return undefined;
+  if (['low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
+    return effort;
+  }
+  console.warn(`[llm-provider] Ignoring unsupported CTI_DEFAULT_EFFORT="${effort}"`);
+  return undefined;
+}
+
 // ── Cross-runtime model guard ──
 
 const NON_CLAUDE_MODEL_RE = /^(gpt-|o[1-9][-_]|codex[-_]|davinci|text-|openai\/)/i;
@@ -455,8 +465,11 @@ export class SDKLLMProvider implements LLMProvider {
             // Only pass model to CLI if explicitly configured via CTI_DEFAULT_MODEL.
             // Letting the CLI choose its own default avoids exit-code-1 failures
             // when a stored model is inaccessible on the current machine/plan.
-            const passModel = !!process.env.CTI_DEFAULT_MODEL;
-            if (model && !passModel) {
+            const configuredModel = process.env.CTI_DEFAULT_MODEL?.trim();
+            const passModel = !!configuredModel;
+            if (passModel) {
+              model = configuredModel;
+            } else if (model) {
               console.log(`[llm-provider] Skipping model "${model}", using CLI default (set CTI_DEFAULT_MODEL to override)`);
               model = undefined;
             }
@@ -464,10 +477,12 @@ export class SDKLLMProvider implements LLMProvider {
             const queryOptions: Record<string, unknown> = {
               cwd: params.workingDirectory,
               model,
+              effort: configuredEffort(),
               resume: params.sdkSessionId || undefined,
               abortController: params.abortController,
               permissionMode: (params.permissionMode as 'default' | 'acceptEdits' | 'plan') || undefined,
               includePartialMessages: true,
+              debugFile: process.env.CTI_CLAUDE_DEBUG_FILE || undefined,
               env: cleanEnv,
               stderr: (data: string) => {
                 stderrBuf += data;
@@ -684,6 +699,7 @@ export function handleMessage(
           sseEvent('result', {
             session_id: msg.session_id,
             is_error: msg.is_error,
+            error: msg.is_error && 'result' in msg ? String(msg.result || '') : undefined,
             usage: {
               input_tokens: msg.usage.input_tokens,
               output_tokens: msg.usage.output_tokens,

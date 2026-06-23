@@ -7,6 +7,7 @@ export interface Config {
   enabledChannels: string[];
   defaultWorkDir: string;
   defaultModel?: string;
+  defaultEffort?: string;
   defaultMode: string;
   // Telegram
   tgBotToken?: string;
@@ -68,6 +69,14 @@ function splitCsv(value: string | undefined): string[] | undefined {
     .filter(Boolean);
 }
 
+function normalizeEffort(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const effort = value.trim();
+  return ["low", "medium", "high", "xhigh", "max"].includes(effort)
+    ? effort
+    : undefined;
+}
+
 export function loadConfig(): Config {
   let env = new Map<string, string>();
   try {
@@ -85,6 +94,7 @@ export function loadConfig(): Config {
     enabledChannels: splitCsv(env.get("CTI_ENABLED_CHANNELS")) ?? [],
     defaultWorkDir: env.get("CTI_DEFAULT_WORKDIR") || process.cwd(),
     defaultModel: env.get("CTI_DEFAULT_MODEL") || undefined,
+    defaultEffort: normalizeEffort(env.get("CTI_DEFAULT_EFFORT")),
     defaultMode: env.get("CTI_DEFAULT_MODE") || "code",
     tgBotToken: env.get("CTI_TG_BOT_TOKEN") || undefined,
     tgChatId: env.get("CTI_TG_CHAT_ID") || undefined,
@@ -131,6 +141,7 @@ export function saveConfig(config: Config): void {
   );
   out += formatEnvLine("CTI_DEFAULT_WORKDIR", config.defaultWorkDir);
   if (config.defaultModel) out += formatEnvLine("CTI_DEFAULT_MODEL", config.defaultModel);
+  if (config.defaultEffort) out += formatEnvLine("CTI_DEFAULT_EFFORT", config.defaultEffort);
   out += formatEnvLine("CTI_DEFAULT_MODE", config.defaultMode);
   out += formatEnvLine("CTI_TG_BOT_TOKEN", config.tgBotToken);
   out += formatEnvLine("CTI_TG_CHAT_ID", config.tgChatId);
@@ -273,6 +284,10 @@ export function configToSettings(config: Config): Map<string, string> {
   if (config.defaultModel) {
     m.set("bridge_default_model", config.defaultModel);
     m.set("default_model", config.defaultModel);
+  }
+  if (config.defaultEffort) {
+    m.set("bridge_default_effort", config.defaultEffort);
+    m.set("default_effort", config.defaultEffort);
   }
   m.set("bridge_default_mode", config.defaultMode);
 
