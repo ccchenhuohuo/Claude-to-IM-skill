@@ -42,6 +42,18 @@ CTI_RUNTIME="${CTI_RUNTIME:-claude}"
 echo "Runtime: $CTI_RUNTIME"
 echo ""
 
+normalize_feishu_domain_url() {
+  local raw="${1:-feishu}"
+  raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  raw="${raw#http://}"
+  raw="${raw#https://}"
+  raw="${raw%%/*}"
+  case "$raw" in
+    lark|open.larksuite.com) printf '%s' "https://open.larksuite.com" ;;
+    *) printf '%s' "https://open.feishu.cn" ;;
+  esac
+}
+
 # --- Claude CLI available (claude/auto modes) ---
 if [ "$CTI_RUNTIME" = "claude" ] || [ "$CTI_RUNTIME" = "auto" ]; then
   # Resolve CLI path matching the daemon's checkCliCompatibility logic:
@@ -317,8 +329,7 @@ if [ -f "$CONFIG_FILE" ]; then
   if echo "$CTI_CHANNELS" | grep -q feishu; then
     FS_APP_ID=$(get_config CTI_FEISHU_APP_ID)
     FS_SECRET=$(get_config CTI_FEISHU_APP_SECRET)
-    FS_DOMAIN=$(get_config CTI_FEISHU_DOMAIN)
-    FS_DOMAIN="${FS_DOMAIN:-https://open.feishu.cn}"
+    FS_DOMAIN=$(normalize_feishu_domain_url "$(get_config CTI_FEISHU_DOMAIN)")
     if [ -n "$FS_APP_ID" ] && [ -n "$FS_SECRET" ]; then
       FEISHU_RESULT=$(curl -s --max-time 5 -X POST "${FS_DOMAIN}/open-apis/auth/v3/tenant_access_token/internal" \
         -H "Content-Type: application/json" \

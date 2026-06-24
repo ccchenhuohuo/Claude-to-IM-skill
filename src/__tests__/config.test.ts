@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { maskSecret, configToSettings, type Config } from '../config.js';
+import { maskSecret, configToSettings, normalizeFeishuDomain, type Config } from '../config.js';
 
 // ── maskSecret ──
 
@@ -80,13 +80,35 @@ describe('configToSettings', () => {
       enabledChannels: ['feishu'],
       feishuAppId: 'app-id',
       feishuAppSecret: 'app-secret',
-      feishuDomain: 'example.com',
+      feishuDomain: 'https://open.feishu.cn',
       feishuAllowedUsers: ['fu1'],
     });
     assert.equal(m.get('bridge_feishu_app_id'), 'app-id');
     assert.equal(m.get('bridge_feishu_app_secret'), 'app-secret');
-    assert.equal(m.get('bridge_feishu_domain'), 'example.com');
+    assert.equal(m.get('bridge_feishu_domain'), 'feishu');
     assert.equal(m.get('bridge_feishu_allowed_users'), 'fu1');
+  });
+
+  it('normalizes Feishu and Lark domain aliases for core settings', () => {
+    const cases: Array<[string, string]> = [
+      ['feishu', 'feishu'],
+      ['https://open.feishu.cn', 'feishu'],
+      ['open.feishu.cn', 'feishu'],
+      ['lark', 'lark'],
+      ['https://open.larksuite.com', 'lark'],
+      ['open.larksuite.com', 'lark'],
+    ];
+
+    for (const [input, expected] of cases) {
+      assert.equal(normalizeFeishuDomain(input), expected);
+      const m = configToSettings({ ...base, enabledChannels: ['feishu'], feishuDomain: input });
+      assert.equal(m.get('bridge_feishu_domain'), expected);
+    }
+  });
+
+  it('omits unsupported Feishu domains instead of passing raw URLs to core', () => {
+    const m = configToSettings({ ...base, enabledChannels: ['feishu'], feishuDomain: 'example.com' });
+    assert.equal(m.has('bridge_feishu_domain'), false);
   });
 
   it('sets bridge_qq_enabled based on enabledChannels', () => {
@@ -182,17 +204,25 @@ describe('configToSettings', () => {
 
 describe('loadConfig/saveConfig round-trip', () => {
   let tmpDir: string;
-  let origHome: string;
+  let origHome: string | undefined;
+  let origCtiHome: string | undefined;
+
+  async function importConfigForHome(home: string): Promise<typeof import('../config.js')> {
+    process.env.CTI_HOME = home;
+    return await import(`../config.js?ctiHome=${encodeURIComponent(home)}-${Date.now()}`) as typeof import('../config.js');
+  }
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cti-config-test-'));
-    origHome = process.env.HOME || '';
-    // We can't easily override CTI_HOME since it's a const,
-    // so we test the parsing logic indirectly through configToSettings
+    origHome = process.env.HOME;
+    origCtiHome = process.env.CTI_HOME;
   });
 
   afterEach(() => {
-    process.env.HOME = origHome;
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
+    if (origCtiHome === undefined) delete process.env.CTI_HOME;
+    else process.env.CTI_HOME = origCtiHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -208,5 +238,73 @@ describe('loadConfig/saveConfig round-trip', () => {
     assert.equal(m.get('bridge_feishu_enabled'), 'false');
     assert.equal(m.get('bridge_qq_enabled'), 'false');
     assert.equal(m.get('bridge_weixin_enabled'), 'false');
+  });
+
+  it('loads and saves config in an isolated CTI_HOME', async () => {
+    const { CONFIG_PATH, loadConfig, saveConfig } = await importConfigForHome(tmpDir);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, 'CTI_RUNTIME=auto\nCTI_ENABLED_CHANNELS=feishu,qq\nCTI_FEISHU_DOMAIN=open.larksuite.com\n', { mode: 0o600 });
+
+    const loaded = loadConfig();
+    assert.equal(loaded.runtime, 'auto');
+    assert.deepEqual(loaded.enabledChannels, ['feishu', 'qq']);
+    assert.equal(loaded.feishuDomain, 'open.larksuite.com');
+
+    saveConfig({
+      ...loaded,
+      defaultWorkDir: '/tmp/project',
+      defaultMode: 'code',
+      feishuGroupTriggerMode: 'mention',
+    });
+
+    const saved = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    assert.match(saved, /^CTI_RUNTIME=auto$/m);
+    assert.match(saved, /^CTI_DEFAULT_WORKDIR=\/tmp\/project$/m);
+    assert.match(saved, /^CTI_FEISHU_GROUP_TRIGGER_MODE=mention$/m);
+  });
+
+  it('preserves unknown provider and executable env vars when saving config', async () => {
+    const { CONFIG_PATH, saveConfig } = await importConfigForHome(tmpDir);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, [
+      '# user-managed provider env',
+      'ANTHROPIC_API_KEY=keep-anthropic-key',
+      'ANTHROPIC_BASE_URL=https://provider.example/v1',
+      'ANTHROPIC_AUTH_TOKEN=keep-auth-token',
+      'OPENAI_API_KEY=keep-openai-key',
+      'CODEX_API_KEY=keep-codex-key',
+      'CTI_CLAUDE_CODE_EXECUTABLE=/opt/claude/bin/claude',
+      'CUSTOM_ENV=keep-custom',
+      'CTI_RUNTIME=claude',
+      'CTI_DEFAULT_WORKDIR=/old/path',
+      '',
+    ].join('\n'), { mode: 0o600 });
+
+    saveConfig({
+      runtime: 'auto',
+      enabledChannels: ['feishu'],
+      defaultWorkDir: '/new/path',
+      defaultMode: 'plan',
+      feishuDomain: 'https://open.larksuite.com',
+      feishuGroupTriggerMode: 'mention',
+    });
+
+    const saved = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    assert.match(saved, /^ANTHROPIC_API_KEY=keep-anthropic-key$/m);
+    assert.match(saved, /^ANTHROPIC_BASE_URL=https:\/\/provider\.example\/v1$/m);
+    assert.match(saved, /^ANTHROPIC_AUTH_TOKEN=keep-auth-token$/m);
+    assert.match(saved, /^OPENAI_API_KEY=keep-openai-key$/m);
+    assert.match(saved, /^CODEX_API_KEY=keep-codex-key$/m);
+    assert.match(saved, /^CTI_CLAUDE_CODE_EXECUTABLE=\/opt\/claude\/bin\/claude$/m);
+    assert.match(saved, /^CUSTOM_ENV=keep-custom$/m);
+    assert.match(saved, /^CTI_RUNTIME=auto$/m);
+    assert.match(saved, /^CTI_DEFAULT_WORKDIR=\/new\/path$/m);
+    assert.match(saved, /^CTI_DEFAULT_MODE=plan$/m);
+    assert.match(saved, /^CTI_FEISHU_DOMAIN=https:\/\/open\.larksuite\.com$/m);
+    assert.match(saved, /^CTI_FEISHU_GROUP_TRIGGER_MODE=mention$/m);
+    assert.equal(saved.includes('CTI_DEFAULT_WORKDIR=/old/path'), false);
+
+    const perms = fs.statSync(CONFIG_PATH).mode & 0o777;
+    assert.equal(perms, 0o600);
   });
 });

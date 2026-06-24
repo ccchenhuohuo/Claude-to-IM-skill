@@ -88,6 +88,20 @@ function normalizeFeishuGroupTriggerMode(value: string | undefined): 'all' | 'me
   return mode === 'all' || mode === 'mention' ? mode : undefined;
 }
 
+export function normalizeFeishuDomain(value: string | undefined): 'feishu' | 'lark' | undefined {
+  if (!value) return undefined;
+  const domain = value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '')
+    .split('/')[0];
+
+  if (domain === 'feishu' || domain === 'open.feishu.cn') return 'feishu';
+  if (domain === 'lark' || domain === 'open.larksuite.com') return 'lark';
+  return undefined;
+}
+
 function optionalPositiveNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const num = Number(value);
@@ -145,75 +159,140 @@ export function loadConfig(): Config {
     weixinMediaEnabled: env.has("CTI_WEIXIN_MEDIA_ENABLED")
       ? env.get("CTI_WEIXIN_MEDIA_ENABLED") === "true"
       : undefined,
-    autoApprove: env.get("CTI_AUTO_APPROVE") === "true",
+    autoApprove: env.has("CTI_AUTO_APPROVE")
+      ? env.get("CTI_AUTO_APPROVE") === "true"
+      : undefined,
   };
 }
 
-function formatEnvLine(key: string, value: string | undefined): string {
-  if (value === undefined || value === "") return "";
-  return `${key}=${value}\n`;
+const MANAGED_ENV_KEYS = [
+  "CTI_RUNTIME",
+  "CTI_ENABLED_CHANNELS",
+  "CTI_DEFAULT_WORKDIR",
+  "CTI_DEFAULT_MODEL",
+  "CTI_DEFAULT_EFFORT",
+  "CTI_DEFAULT_MODE",
+  "CTI_TG_BOT_TOKEN",
+  "CTI_TG_CHAT_ID",
+  "CTI_TG_ALLOWED_USERS",
+  "CTI_FEISHU_APP_ID",
+  "CTI_FEISHU_APP_SECRET",
+  "CTI_FEISHU_DOMAIN",
+  "CTI_FEISHU_ALLOWED_USERS",
+  "CTI_FEISHU_GROUP_TRIGGER_MODE",
+  "CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES",
+  "CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES",
+  "CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS",
+  "CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS",
+  "CTI_DISCORD_BOT_TOKEN",
+  "CTI_DISCORD_ALLOWED_USERS",
+  "CTI_DISCORD_ALLOWED_CHANNELS",
+  "CTI_DISCORD_ALLOWED_GUILDS",
+  "CTI_QQ_APP_ID",
+  "CTI_QQ_APP_SECRET",
+  "CTI_QQ_ALLOWED_USERS",
+  "CTI_QQ_IMAGE_ENABLED",
+  "CTI_QQ_MAX_IMAGE_SIZE",
+  "CTI_WEIXIN_BASE_URL",
+  "CTI_WEIXIN_CDN_BASE_URL",
+  "CTI_WEIXIN_MEDIA_ENABLED",
+  "CTI_AUTO_APPROVE",
+] as const;
+
+const MANAGED_ENV_KEY_SET = new Set<string>(MANAGED_ENV_KEYS);
+
+function setManagedEnv(entries: Map<string, string>, key: string, value: string | undefined): void {
+  if (value === undefined || value === "") return;
+  entries.set(key, value);
+}
+
+function buildManagedEnv(config: Config): Map<string, string> {
+  const entries = new Map<string, string>();
+  setManagedEnv(entries, "CTI_RUNTIME", config.runtime);
+  setManagedEnv(entries, "CTI_ENABLED_CHANNELS", config.enabledChannels.join(","));
+  setManagedEnv(entries, "CTI_DEFAULT_WORKDIR", config.defaultWorkDir);
+  setManagedEnv(entries, "CTI_DEFAULT_MODEL", config.defaultModel);
+  setManagedEnv(entries, "CTI_DEFAULT_EFFORT", config.defaultEffort);
+  setManagedEnv(entries, "CTI_DEFAULT_MODE", config.defaultMode);
+  setManagedEnv(entries, "CTI_TG_BOT_TOKEN", config.tgBotToken);
+  setManagedEnv(entries, "CTI_TG_CHAT_ID", config.tgChatId);
+  setManagedEnv(entries, "CTI_TG_ALLOWED_USERS", config.tgAllowedUsers?.join(","));
+  setManagedEnv(entries, "CTI_FEISHU_APP_ID", config.feishuAppId);
+  setManagedEnv(entries, "CTI_FEISHU_APP_SECRET", config.feishuAppSecret);
+  setManagedEnv(entries, "CTI_FEISHU_DOMAIN", config.feishuDomain);
+  setManagedEnv(entries, "CTI_FEISHU_ALLOWED_USERS", config.feishuAllowedUsers?.join(","));
+  setManagedEnv(entries, "CTI_FEISHU_GROUP_TRIGGER_MODE", config.feishuGroupTriggerMode);
+  if (config.feishuGroupContextMaxMessages !== undefined)
+    setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES", String(config.feishuGroupContextMaxMessages));
+  if (config.feishuGroupContextMaxAgeMinutes !== undefined)
+    setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES", String(config.feishuGroupContextMaxAgeMinutes));
+  if (config.feishuGroupContextMaxChars !== undefined)
+    setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS", String(config.feishuGroupContextMaxChars));
+  if (config.feishuGroupContextPerMessageMaxChars !== undefined)
+    setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS", String(config.feishuGroupContextPerMessageMaxChars));
+  setManagedEnv(entries, "CTI_DISCORD_BOT_TOKEN", config.discordBotToken);
+  setManagedEnv(entries, "CTI_DISCORD_ALLOWED_USERS", config.discordAllowedUsers?.join(","));
+  setManagedEnv(entries, "CTI_DISCORD_ALLOWED_CHANNELS", config.discordAllowedChannels?.join(","));
+  setManagedEnv(entries, "CTI_DISCORD_ALLOWED_GUILDS", config.discordAllowedGuilds?.join(","));
+  setManagedEnv(entries, "CTI_QQ_APP_ID", config.qqAppId);
+  setManagedEnv(entries, "CTI_QQ_APP_SECRET", config.qqAppSecret);
+  setManagedEnv(entries, "CTI_QQ_ALLOWED_USERS", config.qqAllowedUsers?.join(","));
+  if (config.qqImageEnabled !== undefined)
+    setManagedEnv(entries, "CTI_QQ_IMAGE_ENABLED", String(config.qqImageEnabled));
+  if (config.qqMaxImageSize !== undefined)
+    setManagedEnv(entries, "CTI_QQ_MAX_IMAGE_SIZE", String(config.qqMaxImageSize));
+  setManagedEnv(entries, "CTI_WEIXIN_BASE_URL", config.weixinBaseUrl);
+  setManagedEnv(entries, "CTI_WEIXIN_CDN_BASE_URL", config.weixinCdnBaseUrl);
+  if (config.weixinMediaEnabled !== undefined)
+    setManagedEnv(entries, "CTI_WEIXIN_MEDIA_ENABLED", String(config.weixinMediaEnabled));
+  if (config.autoApprove !== undefined)
+    setManagedEnv(entries, "CTI_AUTO_APPROVE", String(config.autoApprove));
+  return entries;
+}
+
+function mergeEnvContent(existingContent: string, managedEntries: Map<string, string>): string {
+  const out: string[] = [];
+  const seenManaged = new Set<string>();
+  const lines = existingContent ? existingContent.split(/\r?\n/) : [];
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (i === lines.length - 1 && line === "") continue;
+    const trimmed = line.trim();
+    const eqIdx = trimmed.indexOf("=");
+    const key = eqIdx === -1 ? "" : trimmed.slice(0, eqIdx).trim();
+
+    if (!trimmed || trimmed.startsWith("#") || eqIdx === -1 || !MANAGED_ENV_KEY_SET.has(key)) {
+      out.push(line);
+      continue;
+    }
+
+    if (!seenManaged.has(key) && managedEntries.has(key)) {
+      out.push(`${key}=${managedEntries.get(key)}`);
+    }
+    seenManaged.add(key);
+  }
+
+  const missing = MANAGED_ENV_KEYS.filter((key) => managedEntries.has(key) && !seenManaged.has(key));
+  if (missing.length > 0 && out.length > 0 && out[out.length - 1].trim() !== "") {
+    out.push("");
+  }
+  for (const key of missing) {
+    out.push(`${key}=${managedEntries.get(key)}`);
+  }
+
+  return out.length > 0 ? `${out.join("\n")}\n` : "";
 }
 
 export function saveConfig(config: Config): void {
-  let out = "";
-  out += formatEnvLine("CTI_RUNTIME", config.runtime);
-  out += formatEnvLine(
-    "CTI_ENABLED_CHANNELS",
-    config.enabledChannels.join(",")
-  );
-  out += formatEnvLine("CTI_DEFAULT_WORKDIR", config.defaultWorkDir);
-  if (config.defaultModel) out += formatEnvLine("CTI_DEFAULT_MODEL", config.defaultModel);
-  if (config.defaultEffort) out += formatEnvLine("CTI_DEFAULT_EFFORT", config.defaultEffort);
-  out += formatEnvLine("CTI_DEFAULT_MODE", config.defaultMode);
-  out += formatEnvLine("CTI_TG_BOT_TOKEN", config.tgBotToken);
-  out += formatEnvLine("CTI_TG_CHAT_ID", config.tgChatId);
-  out += formatEnvLine(
-    "CTI_TG_ALLOWED_USERS",
-    config.tgAllowedUsers?.join(",")
-  );
-  out += formatEnvLine("CTI_FEISHU_APP_ID", config.feishuAppId);
-  out += formatEnvLine("CTI_FEISHU_APP_SECRET", config.feishuAppSecret);
-  out += formatEnvLine("CTI_FEISHU_DOMAIN", config.feishuDomain);
-  out += formatEnvLine(
-    "CTI_FEISHU_ALLOWED_USERS",
-    config.feishuAllowedUsers?.join(",")
-  );
-  out += formatEnvLine("CTI_FEISHU_GROUP_TRIGGER_MODE", config.feishuGroupTriggerMode);
-  if (config.feishuGroupContextMaxMessages !== undefined)
-    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES", String(config.feishuGroupContextMaxMessages));
-  if (config.feishuGroupContextMaxAgeMinutes !== undefined)
-    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES", String(config.feishuGroupContextMaxAgeMinutes));
-  if (config.feishuGroupContextMaxChars !== undefined)
-    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS", String(config.feishuGroupContextMaxChars));
-  if (config.feishuGroupContextPerMessageMaxChars !== undefined)
-    out += formatEnvLine("CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS", String(config.feishuGroupContextPerMessageMaxChars));
-  out += formatEnvLine("CTI_DISCORD_BOT_TOKEN", config.discordBotToken);
-  out += formatEnvLine(
-    "CTI_DISCORD_ALLOWED_USERS",
-    config.discordAllowedUsers?.join(",")
-  );
-  out += formatEnvLine(
-    "CTI_DISCORD_ALLOWED_CHANNELS",
-    config.discordAllowedChannels?.join(",")
-  );
-  out += formatEnvLine(
-    "CTI_DISCORD_ALLOWED_GUILDS",
-    config.discordAllowedGuilds?.join(",")
-  );
-  out += formatEnvLine("CTI_QQ_APP_ID", config.qqAppId);
-  out += formatEnvLine("CTI_QQ_APP_SECRET", config.qqAppSecret);
-  out += formatEnvLine(
-    "CTI_QQ_ALLOWED_USERS",
-    config.qqAllowedUsers?.join(",")
-  );
-  if (config.qqImageEnabled !== undefined)
-    out += formatEnvLine("CTI_QQ_IMAGE_ENABLED", String(config.qqImageEnabled));
-  if (config.qqMaxImageSize !== undefined)
-    out += formatEnvLine("CTI_QQ_MAX_IMAGE_SIZE", String(config.qqMaxImageSize));
-  out += formatEnvLine("CTI_WEIXIN_BASE_URL", config.weixinBaseUrl);
-  out += formatEnvLine("CTI_WEIXIN_CDN_BASE_URL", config.weixinCdnBaseUrl);
-  if (config.weixinMediaEnabled !== undefined)
-    out += formatEnvLine("CTI_WEIXIN_MEDIA_ENABLED", String(config.weixinMediaEnabled));
+  let existing = "";
+  try {
+    existing = fs.readFileSync(CONFIG_PATH, "utf-8");
+  } catch {
+    // First save; there is no existing config to merge.
+  }
+
+  const out = mergeEnvContent(existing, buildManagedEnv(config));
 
   fs.mkdirSync(CTI_HOME, { recursive: true });
   const tmpPath = CONFIG_PATH + ".tmp";
@@ -275,7 +354,8 @@ export function configToSettings(config: Config): Map<string, string> {
   if (config.feishuAppId) m.set("bridge_feishu_app_id", config.feishuAppId);
   if (config.feishuAppSecret)
     m.set("bridge_feishu_app_secret", config.feishuAppSecret);
-  if (config.feishuDomain) m.set("bridge_feishu_domain", config.feishuDomain);
+  const feishuDomain = normalizeFeishuDomain(config.feishuDomain);
+  if (feishuDomain) m.set("bridge_feishu_domain", feishuDomain);
   if (config.feishuAllowedUsers)
     m.set("bridge_feishu_allowed_users", config.feishuAllowedUsers.join(","));
   if (config.feishuGroupTriggerMode)
