@@ -1,6 +1,6 @@
 # Claude-to-IM Skill
 
-Bridge Claude Code / Codex to IM platforms — chat with AI coding agents from Telegram, Discord, Feishu/Lark, QQ, or WeChat.
+Bridge Claude Code / Codex to Feishu/Lark — chat with AI coding agents from your Feishu workspace.
 
 [中文文档](README_CN.md)
 
@@ -13,8 +13,8 @@ Bridge Claude Code / Codex to IM platforms — chat with AI coding agents from T
 This skill runs a background daemon that connects your IM bots to Claude Code or Codex sessions. Messages from IM are forwarded to the AI coding agent, and responses (including tool use, permission requests, streaming previews) are sent back to your chat.
 
 ```
-You (Telegram/Discord/Feishu/QQ/WeChat)
-  ↕ Bot API
+You (Feishu/Lark)
+  ↕ Feishu/Lark bot events
 Background Daemon (Node.js)
   ↕ Claude Agent SDK or Codex SDK (configurable via CTI_RUNTIME)
 Claude Code / Codex → reads/writes your codebase
@@ -22,10 +22,10 @@ Claude Code / Codex → reads/writes your codebase
 
 ## Features
 
-- **Five IM platforms** — Telegram, Discord, Feishu/Lark, QQ, WeChat — enable any combination
+- **Feishu/Lark bridge** — owner-scoped chats, fixed lark workspaces, sessions, and command controls
 - **Interactive setup** — guided wizard collects tokens with step-by-step instructions
-- **Permission control** — tool calls require explicit approval via inline buttons (Telegram/Discord) or text `/perm` commands / quick `1/2/3` replies (Feishu/QQ/WeChat)
-- **Streaming preview** — see Claude's response as it types (Telegram & Discord)
+- **Permission control** — tool calls require explicit approval via Feishu cards, text `/perm`, or quick `1/2/3` replies
+- **Dreaming memory** — optional nightly README/TODO updates from owner-scoped chat logs
 - **Session persistence** — conversations survive daemon restarts
 - **Secret protection** — tokens stored with `chmod 600`, auto-redacted in all logs
 - **Zero code required** — install the skill and run `/claude-to-im setup`, or tell Codex `claude-to-im setup`
@@ -54,10 +54,10 @@ After installation, tell Claude Code:
 /claude-to-im setup
 ```
 
-If you want WeChat specifically, you can also say:
+For Feishu/Lark setup, you can also say:
 
 ```text
-帮我接微信
+我想在飞书上用 Claude
 ```
 
 #### Alternative: clone directly into Claude Code skills
@@ -99,15 +99,16 @@ After installation, tell Codex:
 claude-to-im setup
 ```
 
-If you want WeChat specifically, you can also say:
+For Feishu/Lark setup, you can also say:
 
 ```text
-帮我接微信桥接
+我想在飞书上用 Claude
 ```
 
 #### Alternative: clone directly into Codex skills
 
 ```bash
+git clone https://github.com/op7418/Claude-to-IM.git ~/.codex/skills/Claude-to-IM
 git clone https://github.com/op7418/Claude-to-IM-skill.git ~/.codex/skills/claude-to-im
 cd ~/.codex/skills/claude-to-im
 npm install
@@ -118,7 +119,7 @@ npm run build
 
 **Claude Code:** Start a new session and type `/` — you should see `claude-to-im` in the skill list. Or ask Claude: "What skills are available?"
 
-**Codex:** Start a new session and say `claude-to-im setup`, `start bridge`, or `帮我接微信桥接`.
+**Codex:** Start a new session and say `claude-to-im setup`, `start bridge`, or `我想在飞书上用 Claude`.
 
 ## Updating the Skill
 
@@ -191,8 +192,8 @@ claude-to-im setup
 
 The wizard will guide you through:
 
-1. **Choose channels** — pick Telegram, Discord, Feishu, QQ, WeChat, or any combination
-2. **Enter credentials** — the wizard explains exactly where to get each token, which settings to enable, and what permissions to grant
+1. **Configure Feishu/Lark** — app credentials, domain, command admins, and event permissions
+2. **Enter credentials** — the wizard explains exactly where to get each value, which settings to enable, and what permissions to grant
 3. **Set defaults** — working directory, model, and mode
 4. **Validate** — tokens are verified against platform APIs immediately
 
@@ -216,7 +217,7 @@ The daemon starts in the background. You can close the terminal — it keeps run
 
 Open your IM app and send a message to your bot. Claude Code / Codex will respond through the bridge.
 
-When Claude needs to use a tool (edit a file, run a command), you'll see a permission prompt with **Allow** / **Deny** buttons right in the chat (Telegram/Discord), or a text `/perm` command prompt / quick `1/2/3` replies (Feishu/QQ/WeChat).
+When Claude needs to use a tool, you'll see a Feishu permission card, or you can use text `/perm` commands / quick `1/2/3` replies.
 
 ## Commands
 
@@ -237,20 +238,6 @@ All commands are run inside Claude Code or Codex:
 
 The `setup` wizard provides inline guidance for every step. Here's a summary:
 
-### Telegram
-
-1. Message `@BotFather` on Telegram → `/newbot` → follow prompts
-2. Copy the bot token (format: `123456789:AABbCc...`)
-3. Recommended: `/setprivacy` → Disable (for group use)
-4. Find your User ID: message `@userinfobot`
-
-### Discord
-
-1. Go to [Discord Developer Portal](https://discord.com/developers/applications) → New Application
-2. Bot tab → Reset Token → copy it
-3. Enable **Message Content Intent** under Privileged Gateway Intents
-4. OAuth2 → URL Generator → scope `bot` → permissions: Send Messages, Read Message History, View Channels → copy invite URL
-
 ### Feishu / Lark
 
 1. Go to [Feishu Open Platform](https://open.feishu.cn/app) (or [Lark](https://open.larksuite.com/app))
@@ -258,37 +245,13 @@ The `setup` wizard provides inline guidance for every step. Here's a summary:
 3. **Batch-add permissions**: go to "Permissions & Scopes" → use batch configuration to add all required scopes (the `setup` wizard provides the exact JSON)
 4. Enable Bot feature under "Add Features"
 5. **Events & Callbacks**: select **"Long Connection"** as event dispatch method → add `im.message.receive_v1` event
-6. **Publish**: go to "Version Management & Release" → create version → submit for review → approve in Admin Console
-7. **Important**: The bot will NOT work until the version is approved and published
+6. Add the `card.action.trigger` callback so permission buttons can resolve tool approvals
+7. **Publish**: go to "Version Management & Release" → create version → submit for review → approve in Admin Console
+8. **Important**: The bot will NOT work until the version is approved and published
 
-### QQ
+### Dreaming
 
-> QQ currently supports **C2C private chat only**. No group/channel support, no inline permission buttons, no streaming preview. Permissions use text `/perm ...` commands. Image inbound only (no image replies).
-
-1. Go to [QQ Bot OpenClaw](https://q.qq.com/qqbot/openclaw)
-2. Create a QQ Bot or select an existing one → get **App ID** and **App Secret** (only two required fields)
-3. Configure sandbox access and scan QR code with QQ to add the bot
-4. `CTI_QQ_ALLOWED_USERS` takes `user_openid` values (not QQ numbers) — can be left empty initially
-5. Set `CTI_QQ_IMAGE_ENABLED=false` if the underlying provider doesn't support image input
-
-### WeChat / Weixin
-
-> WeChat currently uses QR login, single-account mode, text-based permissions, and no streaming preview.
-
-1. Run the local QR helper from your installed skill directory:
-   - Claude Code default install: `cd ~/.claude/skills/claude-to-im && npm run weixin:login`
-   - Codex default install: `cd ~/.codex/skills/claude-to-im && npm run weixin:login`
-2. The helper writes `~/.claude-to-im/runtime/weixin-login.html` and tries to open it in your browser automatically
-3. Scan the QR code with WeChat and confirm on your phone
-4. On success, the linked account is stored in `~/.claude-to-im/data/weixin-accounts.json`
-5. Running the helper again replaces the previously linked WeChat account
-
-Additional notes:
-
-- `CTI_WEIXIN_MEDIA_ENABLED` controls inbound image/file/video downloads only
-- Voice messages only use WeChat's own built-in speech-to-text text
-- If WeChat does not provide `voice_item.text`, the bridge replies with an error instead of downloading/transcribing raw voice audio
-- Permission approvals use text `/perm ...` commands or quick `1/2/3` replies
+Optional nightly dreaming reads each Feishu owner's `.cti/chat-logs` and asks Claude to update that owner's `README.md` and `TODO.md`. Configure it with `CTI_DREAMING_ENABLED`, `CTI_DREAMING_TIME`, `CTI_DREAMING_TIMEZONE`, `CTI_DREAMING_MODEL`, `CTI_DREAMING_MAX_LOG_CHARS`, and `CTI_DREAMING_CATCHUP_DAYS`.
 
 ## Architecture
 

@@ -9,6 +9,9 @@ SKILL_NAME="claude-to-im"
 CODEX_SKILLS_DIR="$HOME/.codex/skills"
 TARGET_DIR="$CODEX_SKILLS_DIR/$SKILL_NAME"
 SOURCE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CORE_DEP_NAME="Claude-to-IM"
+CORE_TARGET_DIR="$CODEX_SKILLS_DIR/$CORE_DEP_NAME"
+CORE_SOURCE_DIR="$(cd "$SOURCE_DIR/../$CORE_DEP_NAME" 2>/dev/null && pwd || true)"
 
 echo "Installing $SKILL_NAME skill for Codex..."
 
@@ -41,6 +44,27 @@ if [ "${1:-}" = "--link" ]; then
 else
   cp -R "$SOURCE_DIR" "$TARGET_DIR"
   echo "Copied to: $TARGET_DIR"
+fi
+
+# The skill package depends on claude-to-im via file:../Claude-to-IM.
+# Prepare that sibling dependency for both copied installs and --link installs.
+if [ ! -e "$CORE_TARGET_DIR/package.json" ]; then
+  if [ -n "$CORE_SOURCE_DIR" ] && [ -f "$CORE_SOURCE_DIR/package.json" ]; then
+    if [ "${1:-}" = "--link" ]; then
+      ln -s "$CORE_SOURCE_DIR" "$CORE_TARGET_DIR"
+      echo "Symlinked dependency: $CORE_TARGET_DIR → $CORE_SOURCE_DIR"
+    else
+      cp -R "$CORE_SOURCE_DIR" "$CORE_TARGET_DIR"
+      echo "Copied dependency to: $CORE_TARGET_DIR"
+    fi
+  elif command -v git >/dev/null 2>&1; then
+    echo "Cloning claude-to-im dependency..."
+    git clone https://github.com/op7418/Claude-to-IM.git "$CORE_TARGET_DIR"
+  else
+    echo "Error: missing sibling dependency $CORE_TARGET_DIR and git is not available."
+    echo "Clone https://github.com/op7418/Claude-to-IM.git to $CORE_TARGET_DIR, then rerun this script."
+    exit 1
+  fi
 fi
 
 # Ensure dependencies (need devDependencies for build step)

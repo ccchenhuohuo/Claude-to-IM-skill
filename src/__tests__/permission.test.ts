@@ -14,6 +14,22 @@ describe('PendingPermissions', () => {
     assert.equal(pp.size, 0);
   });
 
+  it('allow preserves updatedPermissions for the SDK callback', async () => {
+    const pp = new PendingPermissions();
+    const promise = pp.waitFor('req-session');
+    const updatedPermissions = [{
+      type: 'addRules',
+      rules: [{ toolName: 'Bash' }],
+      behavior: 'allow',
+      destination: 'session',
+    }];
+
+    pp.resolve('req-session', { behavior: 'allow', updatedPermissions });
+    const result = await promise;
+    assert.equal(result.behavior, 'allow');
+    assert.deepEqual(result.updatedPermissions, updatedPermissions);
+  });
+
   it('waitFor resolves on deny', async () => {
     const pp = new PendingPermissions();
     const promise = pp.waitFor('req-2');

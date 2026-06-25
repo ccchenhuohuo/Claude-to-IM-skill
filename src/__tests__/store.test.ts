@@ -6,6 +6,7 @@ import { JsonFileStore } from '../store.js';
 import { CTI_HOME } from '../config.js';
 
 const DATA_DIR = path.join(CTI_HOME, 'data');
+const LARK_DIR = path.join(CTI_HOME, 'lark');
 
 // We construct the store with a settings map directly
 function makeSettings(): Map<string, string> {
@@ -21,6 +22,7 @@ describe('JsonFileStore', () => {
   beforeEach(() => {
     // Clean data dir before each test for isolation
     fs.rmSync(DATA_DIR, { recursive: true, force: true });
+    fs.rmSync(LARK_DIR, { recursive: true, force: true });
   });
 
   it('getSetting returns values from settings map', () => {
@@ -112,6 +114,47 @@ describe('JsonFileStore', () => {
     assert.equal(store.listChannelBindings().length, 2);
   });
 
+  it('creates Feishu owners and private lark workspaces', () => {
+    const store = new JsonFileStore(makeSettings());
+    const owner = store.getOrCreateOwner({
+      channelType: 'feishu',
+      chatId: 'oc_123',
+      displayName: 'Strategy Group',
+    }, 'group');
+
+    assert.equal(owner.ownerKey, 'feishu:feishu:group:oc_123');
+    assert.equal(owner.chatType, 'group');
+
+    const workspace = store.getOwnerWorkspace(owner.ownerKey);
+    assert.equal(path.dirname(workspace), LARK_DIR);
+    assert.ok(fs.existsSync(path.join(workspace, 'README.md')));
+    assert.ok(fs.existsSync(path.join(workspace, 'TODO.md')));
+    assert.ok(fs.existsSync(path.join(workspace, '.cti', 'owner.json')));
+    assert.ok(fs.existsSync(path.join(workspace, '.cti', 'chat-logs')));
+    assert.equal(fs.statSync(path.join(workspace, '.cti', 'owner.json')).mode & 0o777, 0o600);
+  });
+
+  it('creates and lists owner-scoped sessions', () => {
+    const store = new JsonFileStore(makeSettings());
+    const owner = store.getOrCreateOwner({ channelType: 'feishu', chatId: 'ou_private' }, 'private');
+    const session = store.createSessionForOwner(owner.ownerKey, {
+      title: '项目讨论',
+      titleStatus: 'manual',
+      model: 'model-1',
+      mode: 'plan',
+    });
+
+    assert.equal(session.ownerKey, owner.ownerKey);
+    assert.equal(session.title, '项目讨论');
+    assert.equal(session.titleStatus, 'manual');
+    assert.equal(session.generation, 1);
+    assert.equal(session.mode, 'plan');
+    assert.ok(session.working_directory.startsWith(LARK_DIR));
+
+    const sessions = store.listSessionsByOwner(owner.ownerKey);
+    assert.deepEqual(sessions.map((s) => s.id), [session.id]);
+  });
+
   it('addMessage and getMessages', () => {
     const store = new JsonFileStore(makeSettings());
     const session = store.createSession('test', 'model', undefined, '/tmp');
@@ -122,6 +165,37 @@ describe('JsonFileStore', () => {
     assert.equal(messages.length, 2);
     assert.equal(messages[0].role, 'user');
     assert.equal(messages[1].content, 'hi');
+  });
+
+  it('persists data files with private permissions', () => {
+    const store = new JsonFileStore(makeSettings());
+    const session = store.createSession('test', 'model', undefined, '/tmp');
+    store.addMessage(session.id, 'user', 'hello');
+    store.insertPermissionLink({
+      permissionRequestId: 'pr-private',
+      channelType: 'feishu',
+      chatId: 'chat-private',
+      messageId: 'msg-private',
+      toolName: 'Bash',
+      suggestions: '',
+    });
+    store.insertAuditLog({
+      channelType: 'feishu',
+      chatId: 'chat-private',
+      direction: 'inbound',
+      messageId: 'msg-audit',
+      summary: 'audit',
+    });
+
+    const files = [
+      path.join(DATA_DIR, 'sessions.json'),
+      path.join(DATA_DIR, 'messages', `${session.id}.json`),
+      path.join(DATA_DIR, 'permissions.json'),
+      path.join(DATA_DIR, 'audit.json'),
+    ];
+    for (const file of files) {
+      assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    }
   });
 
   it('getMessages with limit returns last N', () => {
@@ -181,12 +255,19 @@ describe('JsonFileStore', () => {
       channelType: 'telegram',
       chatId: '123',
       messageId: 'msg-1',
+      sessionId: 'session-1',
       toolName: 'bash',
+      toolInput: '{"command":"pwd"}',
       suggestions: 'allow,deny',
     });
     const link = store.getPermissionLink('pr-1');
     assert.ok(link);
     assert.equal(link.permissionRequestId, 'pr-1');
+    assert.equal(link.channelType, 'telegram');
+    assert.equal(link.sessionId, 'session-1');
+    assert.equal(link.toolName, 'bash');
+    assert.equal(link.toolInput, '{"command":"pwd"}');
+    assert.ok(link.createdAt);
     assert.equal(link.resolved, false);
   });
 
@@ -201,6 +282,8 @@ describe('JsonFileStore', () => {
       suggestions: '',
     });
     assert.ok(store.markPermissionLinkResolved('pr-2'));
+    const resolved = store.getPermissionLink('pr-2');
+    assert.ok(resolved?.resolvedAt);
     // Second call returns false (already resolved)
     assert.equal(store.markPermissionLinkResolved('pr-2'), false);
     // Unknown id returns false
@@ -244,6 +327,39 @@ describe('JsonFileStore', () => {
     assert.equal(pending2[0].permissionRequestId, 'pr-c');
     // No permissions for unknown chat
     assert.equal(store.listPendingPermissionLinksByChat('chat-unknown').length, 0);
+  });
+
+  it('listPendingPermissionLinksByChat filters channel collisions and expires stale links', () => {
+    const store = new JsonFileStore(makeSettings());
+    store.insertPermissionLink({
+      permissionRequestId: 'pr-telegram',
+      channelType: 'telegram',
+      chatId: 'same-chat',
+      messageId: 'msg-t',
+      toolName: 'Bash',
+      suggestions: '',
+    });
+    store.insertPermissionLink({
+      permissionRequestId: 'pr-qq',
+      channelType: 'qq',
+      chatId: 'same-chat',
+      messageId: 'msg-q',
+      toolName: 'Bash',
+      suggestions: '',
+    });
+    store.insertPermissionLink({
+      permissionRequestId: 'pr-expired',
+      channelType: 'qq',
+      chatId: 'same-chat',
+      messageId: 'msg-old',
+      toolName: 'Bash',
+      suggestions: '',
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    const qqPending = store.listPendingPermissionLinksByChat('same-chat', 'qq');
+    assert.deepEqual(qqPending.map((link) => link.permissionRequestId), ['pr-qq']);
+    assert.equal(store.getPermissionLink('pr-expired')?.resolved, true);
   });
 
   // ── Dedup ──
@@ -315,6 +431,14 @@ describe('JsonFileStore', () => {
     store.updateSessionModel(session.id, 'model-new');
     const updated = store.getSession(session.id);
     assert.equal(updated?.model, 'model-new');
+  });
+
+  it('updateSessionMode updates mode', () => {
+    const store = new JsonFileStore(makeSettings());
+    const session = store.createSession('test', 'model', undefined, '/tmp', 'code');
+    store.updateSessionMode(session.id, 'plan');
+    const updated = store.getSession(session.id);
+    assert.equal(updated?.mode, 'plan');
   });
 
   // ── Provider (no-op) ──

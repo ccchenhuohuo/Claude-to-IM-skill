@@ -24,13 +24,14 @@ const DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com';
 const DEFAULT_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c';
 
 function ensureDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
 function atomicWrite(filePath: string, data: string): void {
   const tmpPath = `${filePath}.tmp`;
-  fs.writeFileSync(tmpPath, data, 'utf-8');
+  fs.writeFileSync(tmpPath, data, { encoding: 'utf-8', mode: 0o600 });
   fs.renameSync(tmpPath, filePath);
+  fs.chmodSync(filePath, 0o600);
 }
 
 function readJson<T>(filePath: string, fallback: T): T {

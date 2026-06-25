@@ -37,12 +37,59 @@ ensure_built() {
   fi
 }
 
+config_value() {
+  local key="$1"
+  grep "^${key}=" "$CTI_HOME/config.env" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^["'"'"']//;s/["'"'"']$//'
+}
+
+is_provider_env_key() {
+  local key="$1"
+  case "$key" in
+    CTI_RUNTIME|CTI_ENV_ISOLATION|CTI_CLAUDE_CODE_EXECUTABLE|CTI_CLAUDE_DEBUG_FILE|CTI_DEFAULT_MODEL|CTI_DEFAULT_EFFORT|CTI_CODEX_API_KEY|CTI_CODEX_BASE_URL|CTI_CODEX_PASS_MODEL|CTI_CODEX_SKIP_GIT_REPO_CHECK|ANTHROPIC_*|OPENAI_API_KEY|OPENAI_BASE_URL|CODEX_API_KEY|CODEX_BASE_URL)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+load_provider_env() {
+  local file="$CTI_HOME/config.env"
+  [ -f "$file" ] || return 0
+
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "$line" in
+      *=*) ;;
+      *) continue ;;
+    esac
+
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="$(printf '%s' "$key" | xargs)"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    is_provider_env_key "$key" || continue
+
+    if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+
+    export "$key=$value"
+  done < "$file"
+}
+
 # Clean environment for subprocess isolation.
 clean_env() {
   unset CLAUDECODE 2>/dev/null || true
 
   local runtime
-  runtime=$(grep "^CTI_RUNTIME=" "$CTI_HOME/config.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'" | tr -d '"' || true)
+  runtime=$(config_value CTI_RUNTIME || true)
   runtime="${runtime:-claude}"
 
   local mode="${CTI_ENV_ISOLATION:-inherit}"
@@ -133,9 +180,9 @@ case "${1:-help}" in
       exit 1
     fi
 
-    # Source config.env BEFORE clean_env so that CTI_ANTHROPIC_PASSTHROUGH
-    # and other CTI_* flags are available when clean_env checks them.
-    [ -f "$CTI_HOME/config.env" ] && set -a && source "$CTI_HOME/config.env" && set +a
+    # Load only provider/runtime environment variables as data. Channel secrets
+    # stay in config.env and are read by the Node daemon, not executed by shell.
+    load_provider_env
 
     clean_env
     echo "Starting bridge..."

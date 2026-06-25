@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout claude-to-im sibling dependency
+        uses: actions/checkout@v4
+        with:
+          repository: op7418/Claude-to-IM
+          path: Claude-to-IM
+      - name: Link sibling file dependency
+        run: |
+          rm -rf ../Claude-to-IM
+          ln -s "$GITHUB_WORKSPACE/Claude-to-IM" ../Claude-to-IM
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:coverage
+      - run: npm run smoke:pack

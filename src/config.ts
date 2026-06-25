@@ -9,35 +9,27 @@ export interface Config {
   defaultModel?: string;
   defaultEffort?: string;
   defaultMode: string;
-  // Telegram
-  tgBotToken?: string;
-  tgChatId?: string;
-  tgAllowedUsers?: string[];
-  // Feishu
+  // Feishu/Lark
   feishuAppId?: string;
   feishuAppSecret?: string;
   feishuDomain?: string;
-  feishuAllowedUsers?: string[];
+  feishuCommandAdmins?: string[];
   feishuGroupTriggerMode?: 'all' | 'mention';
   feishuGroupContextMaxMessages?: number;
   feishuGroupContextMaxAgeMinutes?: number;
   feishuGroupContextMaxChars?: number;
   feishuGroupContextPerMessageMaxChars?: number;
-  // Discord
-  discordBotToken?: string;
-  discordAllowedUsers?: string[];
-  discordAllowedChannels?: string[];
-  discordAllowedGuilds?: string[];
-  // QQ
-  qqAppId?: string;
-  qqAppSecret?: string;
-  qqAllowedUsers?: string[];
-  qqImageEnabled?: boolean;
-  qqMaxImageSize?: number;
-  // WeChat
+  // Legacy Weixin fields are kept temporarily until the Weixin source files are
+  // removed from the TypeScript compile set in the Feishu-only cleanup.
   weixinBaseUrl?: string;
   weixinCdnBaseUrl?: string;
-  weixinMediaEnabled?: boolean;
+  // Dreaming
+  dreamingEnabled?: boolean;
+  dreamingTime?: string;
+  dreamingTimezone?: string;
+  dreamingModel?: string;
+  dreamingMaxLogChars?: number;
+  dreamingCatchupDays?: number;
   // Auto-approve all tool permission requests without user confirmation
   autoApprove?: boolean;
 }
@@ -74,6 +66,11 @@ function splitCsv(value: string | undefined): string[] | undefined {
     .filter(Boolean);
 }
 
+function normalizeEnabledChannels(value: string | undefined): string[] {
+  const channels = splitCsv(value) ?? [];
+  return channels.some((channel) => channel.toLowerCase() === 'feishu') ? ['feishu'] : [];
+}
+
 function normalizeEffort(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const effort = value.trim();
@@ -108,6 +105,17 @@ function optionalPositiveNumber(value: string | undefined): number | undefined {
   return Number.isFinite(num) && num > 0 ? num : undefined;
 }
 
+function optionalBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  return value.trim().toLowerCase() === 'true';
+}
+
+function normalizeDreamingTime(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const time = value.trim();
+  return /^\d{2}:\d{2}$/.test(time) ? time : undefined;
+}
+
 export function loadConfig(): Config {
   let env = new Map<string, string>();
   try {
@@ -122,46 +130,27 @@ export function loadConfig(): Config {
 
   return {
     runtime,
-    enabledChannels: splitCsv(env.get("CTI_ENABLED_CHANNELS")) ?? [],
+    enabledChannels: normalizeEnabledChannels(env.get("CTI_ENABLED_CHANNELS")),
     defaultWorkDir: env.get("CTI_DEFAULT_WORKDIR") || process.cwd(),
     defaultModel: env.get("CTI_DEFAULT_MODEL") || undefined,
     defaultEffort: normalizeEffort(env.get("CTI_DEFAULT_EFFORT")),
     defaultMode: env.get("CTI_DEFAULT_MODE") || "code",
-    tgBotToken: env.get("CTI_TG_BOT_TOKEN") || undefined,
-    tgChatId: env.get("CTI_TG_CHAT_ID") || undefined,
-    tgAllowedUsers: splitCsv(env.get("CTI_TG_ALLOWED_USERS")),
     feishuAppId: env.get("CTI_FEISHU_APP_ID") || undefined,
     feishuAppSecret: env.get("CTI_FEISHU_APP_SECRET") || undefined,
     feishuDomain: env.get("CTI_FEISHU_DOMAIN") || undefined,
-    feishuAllowedUsers: splitCsv(env.get("CTI_FEISHU_ALLOWED_USERS")),
+    feishuCommandAdmins: splitCsv(env.get("CTI_FEISHU_COMMAND_ADMINS")),
     feishuGroupTriggerMode: normalizeFeishuGroupTriggerMode(env.get("CTI_FEISHU_GROUP_TRIGGER_MODE")),
     feishuGroupContextMaxMessages: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES")),
     feishuGroupContextMaxAgeMinutes: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES")),
     feishuGroupContextMaxChars: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS")),
     feishuGroupContextPerMessageMaxChars: optionalPositiveNumber(env.get("CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS")),
-    discordBotToken: env.get("CTI_DISCORD_BOT_TOKEN") || undefined,
-    discordAllowedUsers: splitCsv(env.get("CTI_DISCORD_ALLOWED_USERS")),
-    discordAllowedChannels: splitCsv(
-      env.get("CTI_DISCORD_ALLOWED_CHANNELS")
-    ),
-    discordAllowedGuilds: splitCsv(env.get("CTI_DISCORD_ALLOWED_GUILDS")),
-    qqAppId: env.get("CTI_QQ_APP_ID") || undefined,
-    qqAppSecret: env.get("CTI_QQ_APP_SECRET") || undefined,
-    qqAllowedUsers: splitCsv(env.get("CTI_QQ_ALLOWED_USERS")),
-    qqImageEnabled: env.has("CTI_QQ_IMAGE_ENABLED")
-      ? env.get("CTI_QQ_IMAGE_ENABLED") === "true"
-      : undefined,
-    qqMaxImageSize: env.get("CTI_QQ_MAX_IMAGE_SIZE")
-      ? Number(env.get("CTI_QQ_MAX_IMAGE_SIZE"))
-      : undefined,
-    weixinBaseUrl: env.get("CTI_WEIXIN_BASE_URL") || undefined,
-    weixinCdnBaseUrl: env.get("CTI_WEIXIN_CDN_BASE_URL") || undefined,
-    weixinMediaEnabled: env.has("CTI_WEIXIN_MEDIA_ENABLED")
-      ? env.get("CTI_WEIXIN_MEDIA_ENABLED") === "true"
-      : undefined,
-    autoApprove: env.has("CTI_AUTO_APPROVE")
-      ? env.get("CTI_AUTO_APPROVE") === "true"
-      : undefined,
+    dreamingEnabled: optionalBoolean(env.get("CTI_DREAMING_ENABLED")),
+    dreamingTime: normalizeDreamingTime(env.get("CTI_DREAMING_TIME")),
+    dreamingTimezone: env.get("CTI_DREAMING_TIMEZONE") || undefined,
+    dreamingModel: env.get("CTI_DREAMING_MODEL") || undefined,
+    dreamingMaxLogChars: optionalPositiveNumber(env.get("CTI_DREAMING_MAX_LOG_CHARS")),
+    dreamingCatchupDays: optionalPositiveNumber(env.get("CTI_DREAMING_CATCHUP_DAYS")),
+    autoApprove: optionalBoolean(env.get("CTI_AUTO_APPROVE")),
   };
 }
 
@@ -172,30 +161,21 @@ const MANAGED_ENV_KEYS = [
   "CTI_DEFAULT_MODEL",
   "CTI_DEFAULT_EFFORT",
   "CTI_DEFAULT_MODE",
-  "CTI_TG_BOT_TOKEN",
-  "CTI_TG_CHAT_ID",
-  "CTI_TG_ALLOWED_USERS",
   "CTI_FEISHU_APP_ID",
   "CTI_FEISHU_APP_SECRET",
   "CTI_FEISHU_DOMAIN",
-  "CTI_FEISHU_ALLOWED_USERS",
+  "CTI_FEISHU_COMMAND_ADMINS",
   "CTI_FEISHU_GROUP_TRIGGER_MODE",
   "CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES",
   "CTI_FEISHU_GROUP_CONTEXT_MAX_AGE_MINUTES",
   "CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS",
   "CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS",
-  "CTI_DISCORD_BOT_TOKEN",
-  "CTI_DISCORD_ALLOWED_USERS",
-  "CTI_DISCORD_ALLOWED_CHANNELS",
-  "CTI_DISCORD_ALLOWED_GUILDS",
-  "CTI_QQ_APP_ID",
-  "CTI_QQ_APP_SECRET",
-  "CTI_QQ_ALLOWED_USERS",
-  "CTI_QQ_IMAGE_ENABLED",
-  "CTI_QQ_MAX_IMAGE_SIZE",
-  "CTI_WEIXIN_BASE_URL",
-  "CTI_WEIXIN_CDN_BASE_URL",
-  "CTI_WEIXIN_MEDIA_ENABLED",
+  "CTI_DREAMING_ENABLED",
+  "CTI_DREAMING_TIME",
+  "CTI_DREAMING_TIMEZONE",
+  "CTI_DREAMING_MODEL",
+  "CTI_DREAMING_MAX_LOG_CHARS",
+  "CTI_DREAMING_CATCHUP_DAYS",
   "CTI_AUTO_APPROVE",
 ] as const;
 
@@ -214,13 +194,10 @@ function buildManagedEnv(config: Config): Map<string, string> {
   setManagedEnv(entries, "CTI_DEFAULT_MODEL", config.defaultModel);
   setManagedEnv(entries, "CTI_DEFAULT_EFFORT", config.defaultEffort);
   setManagedEnv(entries, "CTI_DEFAULT_MODE", config.defaultMode);
-  setManagedEnv(entries, "CTI_TG_BOT_TOKEN", config.tgBotToken);
-  setManagedEnv(entries, "CTI_TG_CHAT_ID", config.tgChatId);
-  setManagedEnv(entries, "CTI_TG_ALLOWED_USERS", config.tgAllowedUsers?.join(","));
   setManagedEnv(entries, "CTI_FEISHU_APP_ID", config.feishuAppId);
   setManagedEnv(entries, "CTI_FEISHU_APP_SECRET", config.feishuAppSecret);
   setManagedEnv(entries, "CTI_FEISHU_DOMAIN", config.feishuDomain);
-  setManagedEnv(entries, "CTI_FEISHU_ALLOWED_USERS", config.feishuAllowedUsers?.join(","));
+  setManagedEnv(entries, "CTI_FEISHU_COMMAND_ADMINS", config.feishuCommandAdmins?.join(","));
   setManagedEnv(entries, "CTI_FEISHU_GROUP_TRIGGER_MODE", config.feishuGroupTriggerMode);
   if (config.feishuGroupContextMaxMessages !== undefined)
     setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_MAX_MESSAGES", String(config.feishuGroupContextMaxMessages));
@@ -230,21 +207,15 @@ function buildManagedEnv(config: Config): Map<string, string> {
     setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_MAX_CHARS", String(config.feishuGroupContextMaxChars));
   if (config.feishuGroupContextPerMessageMaxChars !== undefined)
     setManagedEnv(entries, "CTI_FEISHU_GROUP_CONTEXT_PER_MESSAGE_MAX_CHARS", String(config.feishuGroupContextPerMessageMaxChars));
-  setManagedEnv(entries, "CTI_DISCORD_BOT_TOKEN", config.discordBotToken);
-  setManagedEnv(entries, "CTI_DISCORD_ALLOWED_USERS", config.discordAllowedUsers?.join(","));
-  setManagedEnv(entries, "CTI_DISCORD_ALLOWED_CHANNELS", config.discordAllowedChannels?.join(","));
-  setManagedEnv(entries, "CTI_DISCORD_ALLOWED_GUILDS", config.discordAllowedGuilds?.join(","));
-  setManagedEnv(entries, "CTI_QQ_APP_ID", config.qqAppId);
-  setManagedEnv(entries, "CTI_QQ_APP_SECRET", config.qqAppSecret);
-  setManagedEnv(entries, "CTI_QQ_ALLOWED_USERS", config.qqAllowedUsers?.join(","));
-  if (config.qqImageEnabled !== undefined)
-    setManagedEnv(entries, "CTI_QQ_IMAGE_ENABLED", String(config.qqImageEnabled));
-  if (config.qqMaxImageSize !== undefined)
-    setManagedEnv(entries, "CTI_QQ_MAX_IMAGE_SIZE", String(config.qqMaxImageSize));
-  setManagedEnv(entries, "CTI_WEIXIN_BASE_URL", config.weixinBaseUrl);
-  setManagedEnv(entries, "CTI_WEIXIN_CDN_BASE_URL", config.weixinCdnBaseUrl);
-  if (config.weixinMediaEnabled !== undefined)
-    setManagedEnv(entries, "CTI_WEIXIN_MEDIA_ENABLED", String(config.weixinMediaEnabled));
+  if (config.dreamingEnabled !== undefined)
+    setManagedEnv(entries, "CTI_DREAMING_ENABLED", String(config.dreamingEnabled));
+  setManagedEnv(entries, "CTI_DREAMING_TIME", config.dreamingTime);
+  setManagedEnv(entries, "CTI_DREAMING_TIMEZONE", config.dreamingTimezone);
+  setManagedEnv(entries, "CTI_DREAMING_MODEL", config.dreamingModel);
+  if (config.dreamingMaxLogChars !== undefined)
+    setManagedEnv(entries, "CTI_DREAMING_MAX_LOG_CHARS", String(config.dreamingMaxLogChars));
+  if (config.dreamingCatchupDays !== undefined)
+    setManagedEnv(entries, "CTI_DREAMING_CATCHUP_DAYS", String(config.dreamingCatchupDays));
   if (config.autoApprove !== undefined)
     setManagedEnv(entries, "CTI_AUTO_APPROVE", String(config.autoApprove));
   return entries;
@@ -309,44 +280,7 @@ export function configToSettings(config: Config): Map<string, string> {
   const m = new Map<string, string>();
   m.set("remote_bridge_enabled", "true");
 
-  // ── Telegram ──
-  // Upstream keys: telegram_bot_token, bridge_telegram_enabled,
-  //   telegram_bridge_allowed_users, telegram_chat_id
-  m.set(
-    "bridge_telegram_enabled",
-    config.enabledChannels.includes("telegram") ? "true" : "false"
-  );
-  if (config.tgBotToken) m.set("telegram_bot_token", config.tgBotToken);
-  if (config.tgAllowedUsers)
-    m.set("telegram_bridge_allowed_users", config.tgAllowedUsers.join(","));
-  if (config.tgChatId) m.set("telegram_chat_id", config.tgChatId);
-
-  // ── Discord ──
-  // Upstream keys: bridge_discord_bot_token, bridge_discord_enabled,
-  //   bridge_discord_allowed_users, bridge_discord_allowed_channels,
-  //   bridge_discord_allowed_guilds
-  m.set(
-    "bridge_discord_enabled",
-    config.enabledChannels.includes("discord") ? "true" : "false"
-  );
-  if (config.discordBotToken)
-    m.set("bridge_discord_bot_token", config.discordBotToken);
-  if (config.discordAllowedUsers)
-    m.set("bridge_discord_allowed_users", config.discordAllowedUsers.join(","));
-  if (config.discordAllowedChannels)
-    m.set(
-      "bridge_discord_allowed_channels",
-      config.discordAllowedChannels.join(",")
-    );
-  if (config.discordAllowedGuilds)
-    m.set(
-      "bridge_discord_allowed_guilds",
-      config.discordAllowedGuilds.join(",")
-    );
-
-  // ── Feishu ──
-  // Upstream keys: bridge_feishu_app_id, bridge_feishu_app_secret,
-  //   bridge_feishu_domain, bridge_feishu_enabled, bridge_feishu_allowed_users
+  // ── Feishu/Lark ──
   m.set(
     "bridge_feishu_enabled",
     config.enabledChannels.includes("feishu") ? "true" : "false"
@@ -356,8 +290,8 @@ export function configToSettings(config: Config): Map<string, string> {
     m.set("bridge_feishu_app_secret", config.feishuAppSecret);
   const feishuDomain = normalizeFeishuDomain(config.feishuDomain);
   if (feishuDomain) m.set("bridge_feishu_domain", feishuDomain);
-  if (config.feishuAllowedUsers)
-    m.set("bridge_feishu_allowed_users", config.feishuAllowedUsers.join(","));
+  if (config.feishuCommandAdmins)
+    m.set("bridge_feishu_command_admins", config.feishuCommandAdmins.join(","));
   if (config.feishuGroupTriggerMode)
     m.set("bridge_feishu_group_trigger_mode", config.feishuGroupTriggerMode);
   if (config.feishuGroupContextMaxMessages !== undefined)
@@ -369,38 +303,21 @@ export function configToSettings(config: Config): Map<string, string> {
   if (config.feishuGroupContextPerMessageMaxChars !== undefined)
     m.set("bridge_feishu_group_context_per_message_max_chars", String(config.feishuGroupContextPerMessageMaxChars));
 
-  // ── QQ ──
-  // Upstream keys: bridge_qq_enabled, bridge_qq_app_id, bridge_qq_app_secret,
-  //   bridge_qq_allowed_users, bridge_qq_image_enabled, bridge_qq_max_image_size
-  m.set(
-    "bridge_qq_enabled",
-    config.enabledChannels.includes("qq") ? "true" : "false"
-  );
-  if (config.qqAppId) m.set("bridge_qq_app_id", config.qqAppId);
-  if (config.qqAppSecret) m.set("bridge_qq_app_secret", config.qqAppSecret);
-  if (config.qqAllowedUsers)
-    m.set("bridge_qq_allowed_users", config.qqAllowedUsers.join(","));
-  if (config.qqImageEnabled !== undefined)
-    m.set("bridge_qq_image_enabled", String(config.qqImageEnabled));
-  if (config.qqMaxImageSize !== undefined)
-    m.set("bridge_qq_max_image_size", String(config.qqMaxImageSize));
-
-  // ── WeChat ──
-  // Upstream keys: bridge_weixin_enabled, bridge_weixin_media_enabled,
-  //   bridge_weixin_base_url, bridge_weixin_cdn_base_url
-  m.set(
-    "bridge_weixin_enabled",
-    config.enabledChannels.includes("weixin") ? "true" : "false"
-  );
-  if (config.weixinMediaEnabled !== undefined)
-    m.set("bridge_weixin_media_enabled", String(config.weixinMediaEnabled));
-  if (config.weixinBaseUrl)
-    m.set("bridge_weixin_base_url", config.weixinBaseUrl);
-  if (config.weixinCdnBaseUrl)
-    m.set("bridge_weixin_cdn_base_url", config.weixinCdnBaseUrl);
+  // ── Dreaming ──
+  if (config.dreamingEnabled !== undefined)
+    m.set("bridge_dreaming_enabled", String(config.dreamingEnabled));
+  if (config.dreamingTime)
+    m.set("bridge_dreaming_time", config.dreamingTime);
+  if (config.dreamingTimezone)
+    m.set("bridge_dreaming_timezone", config.dreamingTimezone);
+  if (config.dreamingModel)
+    m.set("bridge_dreaming_model", config.dreamingModel);
+  if (config.dreamingMaxLogChars !== undefined)
+    m.set("bridge_dreaming_max_log_chars", String(config.dreamingMaxLogChars));
+  if (config.dreamingCatchupDays !== undefined)
+    m.set("bridge_dreaming_catchup_days", String(config.dreamingCatchupDays));
 
   // ── Defaults ──
-  // Upstream keys: bridge_default_work_dir, bridge_default_model, default_model
   m.set("bridge_default_work_dir", config.defaultWorkDir);
   if (config.defaultModel) {
     m.set("bridge_default_model", config.defaultModel);

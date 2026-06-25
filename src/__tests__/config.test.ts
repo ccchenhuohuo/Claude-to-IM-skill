@@ -39,39 +39,13 @@ describe('configToSettings', () => {
     assert.equal(m.get('remote_bridge_enabled'), 'true');
   });
 
-  it('sets channel enabled flags based on enabledChannels', () => {
-    const m = configToSettings({ ...base, enabledChannels: ['telegram', 'discord'] });
-    assert.equal(m.get('bridge_telegram_enabled'), 'true');
-    assert.equal(m.get('bridge_discord_enabled'), 'true');
-    assert.equal(m.get('bridge_feishu_enabled'), 'false');
-  });
-
-  it('maps telegram config', () => {
-    const m = configToSettings({
-      ...base,
-      enabledChannels: ['telegram'],
-      tgBotToken: 'bot123:abc',
-      tgAllowedUsers: ['user1', 'user2'],
-      tgChatId: '99999',
-    });
-    assert.equal(m.get('telegram_bot_token'), 'bot123:abc');
-    assert.equal(m.get('telegram_bridge_allowed_users'), 'user1,user2');
-    assert.equal(m.get('telegram_chat_id'), '99999');
-  });
-
-  it('maps discord config', () => {
-    const m = configToSettings({
-      ...base,
-      enabledChannels: ['discord'],
-      discordBotToken: 'discord-token',
-      discordAllowedUsers: ['u1'],
-      discordAllowedChannels: ['c1', 'c2'],
-      discordAllowedGuilds: ['g1'],
-    });
-    assert.equal(m.get('bridge_discord_bot_token'), 'discord-token');
-    assert.equal(m.get('bridge_discord_allowed_users'), 'u1');
-    assert.equal(m.get('bridge_discord_allowed_channels'), 'c1,c2');
-    assert.equal(m.get('bridge_discord_allowed_guilds'), 'g1');
+  it('enables only Feishu/Lark channel settings', () => {
+    const m = configToSettings({ ...base, enabledChannels: ['feishu'] });
+    assert.equal(m.get('bridge_feishu_enabled'), 'true');
+    assert.equal(m.has('bridge_telegram_enabled'), false);
+    assert.equal(m.has('bridge_discord_enabled'), false);
+    assert.equal(m.has('bridge_qq_enabled'), false);
+    assert.equal(m.has('bridge_weixin_enabled'), false);
   });
 
   it('maps feishu config', () => {
@@ -81,12 +55,12 @@ describe('configToSettings', () => {
       feishuAppId: 'app-id',
       feishuAppSecret: 'app-secret',
       feishuDomain: 'https://open.feishu.cn',
-      feishuAllowedUsers: ['fu1'],
+      feishuCommandAdmins: ['ou_1', 'ou_2'],
     });
     assert.equal(m.get('bridge_feishu_app_id'), 'app-id');
     assert.equal(m.get('bridge_feishu_app_secret'), 'app-secret');
     assert.equal(m.get('bridge_feishu_domain'), 'feishu');
-    assert.equal(m.get('bridge_feishu_allowed_users'), 'fu1');
+    assert.equal(m.get('bridge_feishu_command_admins'), 'ou_1,ou_2');
   });
 
   it('normalizes Feishu and Lark domain aliases for core settings', () => {
@@ -111,66 +85,22 @@ describe('configToSettings', () => {
     assert.equal(m.has('bridge_feishu_domain'), false);
   });
 
-  it('sets bridge_qq_enabled based on enabledChannels', () => {
-    const m = configToSettings({ ...base, enabledChannels: ['qq'] });
-    assert.equal(m.get('bridge_qq_enabled'), 'true');
-    assert.equal(m.get('bridge_telegram_enabled'), 'false');
-  });
-
-  it('defaults bridge_qq_enabled to false', () => {
-    const m = configToSettings(base);
-    assert.equal(m.get('bridge_qq_enabled'), 'false');
-  });
-
-  it('maps qq config fields', () => {
+  it('maps dreaming settings', () => {
     const m = configToSettings({
       ...base,
-      enabledChannels: ['qq'],
-      qqAppId: 'qq-app-id',
-      qqAppSecret: 'qq-secret',
-      qqAllowedUsers: ['openid1', 'openid2'],
+      dreamingEnabled: true,
+      dreamingTime: '01:00',
+      dreamingTimezone: 'Asia/Shanghai',
+      dreamingModel: 'claude-opus-4-8',
+      dreamingMaxLogChars: 120000,
+      dreamingCatchupDays: 3,
     });
-    assert.equal(m.get('bridge_qq_app_id'), 'qq-app-id');
-    assert.equal(m.get('bridge_qq_app_secret'), 'qq-secret');
-    assert.equal(m.get('bridge_qq_allowed_users'), 'openid1,openid2');
-  });
-
-  it('maps qq image settings', () => {
-    const m = configToSettings({
-      ...base,
-      enabledChannels: ['qq'],
-      qqAppId: 'id',
-      qqAppSecret: 'secret',
-      qqImageEnabled: false,
-      qqMaxImageSize: 10,
-    });
-    assert.equal(m.get('bridge_qq_image_enabled'), 'false');
-    assert.equal(m.get('bridge_qq_max_image_size'), '10');
-  });
-
-  it('maps weixin settings', () => {
-    const m = configToSettings({
-      ...base,
-      enabledChannels: ['weixin'],
-      weixinBaseUrl: 'https://example.weixin.test',
-      weixinCdnBaseUrl: 'https://cdn.weixin.test',
-      weixinMediaEnabled: true,
-    });
-    assert.equal(m.get('bridge_weixin_enabled'), 'true');
-    assert.equal(m.get('bridge_weixin_base_url'), 'https://example.weixin.test');
-    assert.equal(m.get('bridge_weixin_cdn_base_url'), 'https://cdn.weixin.test');
-    assert.equal(m.get('bridge_weixin_media_enabled'), 'true');
-  });
-
-  it('omits qq image settings when not set', () => {
-    const m = configToSettings({
-      ...base,
-      enabledChannels: ['qq'],
-      qqAppId: 'id',
-      qqAppSecret: 'secret',
-    });
-    assert.equal(m.has('bridge_qq_image_enabled'), false);
-    assert.equal(m.has('bridge_qq_max_image_size'), false);
+    assert.equal(m.get('bridge_dreaming_enabled'), 'true');
+    assert.equal(m.get('bridge_dreaming_time'), '01:00');
+    assert.equal(m.get('bridge_dreaming_timezone'), 'Asia/Shanghai');
+    assert.equal(m.get('bridge_dreaming_model'), 'claude-opus-4-8');
+    assert.equal(m.get('bridge_dreaming_max_log_chars'), '120000');
+    assert.equal(m.get('bridge_dreaming_catchup_days'), '3');
   });
 
   it('maps workdir and mode, omits model when not set', () => {
@@ -182,9 +112,9 @@ describe('configToSettings', () => {
   });
 
   it('maps model when explicitly set', () => {
-    const m = configToSettings({ ...base, defaultModel: 'gpt-4o' });
-    assert.equal(m.get('bridge_default_model'), 'gpt-4o');
-    assert.equal(m.get('default_model'), 'gpt-4o');
+    const m = configToSettings({ ...base, defaultModel: 'claude-opus-4-8' });
+    assert.equal(m.get('bridge_default_model'), 'claude-opus-4-8');
+    assert.equal(m.get('default_model'), 'claude-opus-4-8');
   });
 
   it('maps non-default mode', () => {
@@ -194,9 +124,9 @@ describe('configToSettings', () => {
 
   it('omits optional fields when not set', () => {
     const m = configToSettings(base);
-    assert.equal(m.has('telegram_bot_token'), false);
-    assert.equal(m.has('bridge_discord_bot_token'), false);
     assert.equal(m.has('bridge_feishu_app_id'), false);
+    assert.equal(m.has('bridge_feishu_command_admins'), false);
+    assert.equal(m.has('bridge_dreaming_enabled'), false);
   });
 });
 
@@ -233,22 +163,39 @@ describe('loadConfig/saveConfig round-trip', () => {
       defaultWorkDir: process.cwd(),
       defaultMode: 'code',
     });
-    assert.equal(m.get('bridge_telegram_enabled'), 'false');
-    assert.equal(m.get('bridge_discord_enabled'), 'false');
     assert.equal(m.get('bridge_feishu_enabled'), 'false');
-    assert.equal(m.get('bridge_qq_enabled'), 'false');
-    assert.equal(m.get('bridge_weixin_enabled'), 'false');
+    assert.equal(m.has('bridge_telegram_enabled'), false);
+    assert.equal(m.has('bridge_discord_enabled'), false);
+    assert.equal(m.has('bridge_qq_enabled'), false);
+    assert.equal(m.has('bridge_weixin_enabled'), false);
   });
 
-  it('loads and saves config in an isolated CTI_HOME', async () => {
+  it('loads and saves Feishu-only config in an isolated CTI_HOME', async () => {
     const { CONFIG_PATH, loadConfig, saveConfig } = await importConfigForHome(tmpDir);
     fs.mkdirSync(tmpDir, { recursive: true });
-    fs.writeFileSync(CONFIG_PATH, 'CTI_RUNTIME=auto\nCTI_ENABLED_CHANNELS=feishu,qq\nCTI_FEISHU_DOMAIN=open.larksuite.com\n', { mode: 0o600 });
+    fs.writeFileSync(CONFIG_PATH, [
+      'CTI_RUNTIME=auto',
+      'CTI_ENABLED_CHANNELS=feishu,qq,telegram,weixin',
+      'CTI_FEISHU_DOMAIN=open.larksuite.com',
+      'CTI_FEISHU_COMMAND_ADMINS=ou_1,ou_2',
+      'CTI_DREAMING_ENABLED=true',
+      'CTI_DREAMING_TIME=01:00',
+      'CTI_DREAMING_TIMEZONE=Asia/Shanghai',
+      'CTI_DREAMING_MAX_LOG_CHARS=30000',
+      'CTI_DREAMING_CATCHUP_DAYS=2',
+      '',
+    ].join('\n'), { mode: 0o600 });
 
     const loaded = loadConfig();
     assert.equal(loaded.runtime, 'auto');
-    assert.deepEqual(loaded.enabledChannels, ['feishu', 'qq']);
+    assert.deepEqual(loaded.enabledChannels, ['feishu']);
     assert.equal(loaded.feishuDomain, 'open.larksuite.com');
+    assert.deepEqual(loaded.feishuCommandAdmins, ['ou_1', 'ou_2']);
+    assert.equal(loaded.dreamingEnabled, true);
+    assert.equal(loaded.dreamingTime, '01:00');
+    assert.equal(loaded.dreamingTimezone, 'Asia/Shanghai');
+    assert.equal(loaded.dreamingMaxLogChars, 30000);
+    assert.equal(loaded.dreamingCatchupDays, 2);
 
     saveConfig({
       ...loaded,
@@ -259,11 +206,16 @@ describe('loadConfig/saveConfig round-trip', () => {
 
     const saved = fs.readFileSync(CONFIG_PATH, 'utf-8');
     assert.match(saved, /^CTI_RUNTIME=auto$/m);
+    assert.match(saved, /^CTI_ENABLED_CHANNELS=feishu$/m);
     assert.match(saved, /^CTI_DEFAULT_WORKDIR=\/tmp\/project$/m);
+    assert.match(saved, /^CTI_FEISHU_COMMAND_ADMINS=ou_1,ou_2$/m);
     assert.match(saved, /^CTI_FEISHU_GROUP_TRIGGER_MODE=mention$/m);
+    assert.match(saved, /^CTI_DREAMING_ENABLED=true$/m);
+    assert.match(saved, /^CTI_DREAMING_TIME=01:00$/m);
+    assert.match(saved, /^CTI_DREAMING_TIMEZONE=Asia\/Shanghai$/m);
   });
 
-  it('preserves unknown provider and executable env vars when saving config', async () => {
+  it('preserves unknown provider, executable, and legacy non-Feishu env vars when saving config', async () => {
     const { CONFIG_PATH, saveConfig } = await importConfigForHome(tmpDir);
     fs.mkdirSync(tmpDir, { recursive: true });
     fs.writeFileSync(CONFIG_PATH, [
@@ -274,6 +226,8 @@ describe('loadConfig/saveConfig round-trip', () => {
       'OPENAI_API_KEY=keep-openai-key',
       'CODEX_API_KEY=keep-codex-key',
       'CTI_CLAUDE_CODE_EXECUTABLE=/opt/claude/bin/claude',
+      'CTI_TG_BOT_TOKEN=legacy-telegram-token',
+      'CTI_QQ_APP_SECRET=legacy-qq-secret',
       'CUSTOM_ENV=keep-custom',
       'CTI_RUNTIME=claude',
       'CTI_DEFAULT_WORKDIR=/old/path',
@@ -287,6 +241,8 @@ describe('loadConfig/saveConfig round-trip', () => {
       defaultMode: 'plan',
       feishuDomain: 'https://open.larksuite.com',
       feishuGroupTriggerMode: 'mention',
+      feishuCommandAdmins: ['ou_admin'],
+      dreamingEnabled: false,
     });
 
     const saved = fs.readFileSync(CONFIG_PATH, 'utf-8');
@@ -296,12 +252,16 @@ describe('loadConfig/saveConfig round-trip', () => {
     assert.match(saved, /^OPENAI_API_KEY=keep-openai-key$/m);
     assert.match(saved, /^CODEX_API_KEY=keep-codex-key$/m);
     assert.match(saved, /^CTI_CLAUDE_CODE_EXECUTABLE=\/opt\/claude\/bin\/claude$/m);
+    assert.match(saved, /^CTI_TG_BOT_TOKEN=legacy-telegram-token$/m);
+    assert.match(saved, /^CTI_QQ_APP_SECRET=legacy-qq-secret$/m);
     assert.match(saved, /^CUSTOM_ENV=keep-custom$/m);
     assert.match(saved, /^CTI_RUNTIME=auto$/m);
     assert.match(saved, /^CTI_DEFAULT_WORKDIR=\/new\/path$/m);
     assert.match(saved, /^CTI_DEFAULT_MODE=plan$/m);
     assert.match(saved, /^CTI_FEISHU_DOMAIN=https:\/\/open\.larksuite\.com$/m);
     assert.match(saved, /^CTI_FEISHU_GROUP_TRIGGER_MODE=mention$/m);
+    assert.match(saved, /^CTI_FEISHU_COMMAND_ADMINS=ou_admin$/m);
+    assert.match(saved, /^CTI_DREAMING_ENABLED=false$/m);
     assert.equal(saved.includes('CTI_DEFAULT_WORKDIR=/old/path'), false);
 
     const perms = fs.statSync(CONFIG_PATH).mode & 0o777;

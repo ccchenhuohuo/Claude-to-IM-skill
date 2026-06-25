@@ -8,8 +8,8 @@
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { SDKMessage, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import type { LLMProvider, StreamChatParams, FileAttachment } from 'claude-to-im/src/lib/bridge/host.js';
+import type { SDKMessage, PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
+import type { LLMProvider, StreamChatParams, FileAttachment } from 'claude-to-im/host';
 import type { PendingPermissions } from './permission-gateway.js';
 
 import { sseEvent } from './sse-utils.js';
@@ -493,7 +493,7 @@ export class SDKLLMProvider implements LLMProvider {
               canUseTool: async (
                   toolName: string,
                   input: Record<string, unknown>,
-                  opts: { toolUseID: string; suggestions?: string[] },
+                  opts: { toolUseID: string; suggestions?: unknown[] },
                 ): Promise<PermissionResult> => {
                   // Auto-approve if configured (useful for channels without
                   // interactive permission UI, e.g. Feishu WebSocket mode)
@@ -515,7 +515,11 @@ export class SDKLLMProvider implements LLMProvider {
                   const result = await pendingPerms.waitFor(opts.toolUseID);
 
                   if (result.behavior === 'allow') {
-                    return { behavior: 'allow' as const, updatedInput: input };
+                    return {
+                      behavior: 'allow' as const,
+                      updatedInput: input,
+                      ...(result.updatedPermissions ? { updatedPermissions: result.updatedPermissions as PermissionUpdate[] } : {}),
+                    };
                   }
                   return {
                     behavior: 'deny' as const,

@@ -1,6 +1,6 @@
 # Claude-to-IM Skill
 
-将 Claude Code / Codex 桥接到 IM 平台 —— 在 Telegram、Discord、飞书、QQ 或微信中与 AI 编程代理对话。
+将 Claude Code / Codex 桥接到飞书 / Lark —— 在飞书工作区中与 AI 编程代理对话。
 
 [English](README.md)
 
@@ -13,8 +13,8 @@
 本 Skill 运行一个后台守护进程，将你的 IM 机器人连接到 Claude Code 或 Codex 会话。来自 IM 的消息被转发给 AI 编程代理，响应（包括工具调用、权限请求、流式预览）会发回到聊天中。
 
 ```
-你 (Telegram/Discord/飞书/QQ/微信)
-  ↕ Bot API
+你 (飞书/Lark)
+  ↕ 飞书/Lark 机器人事件
 后台守护进程 (Node.js)
   ↕ Claude Agent SDK 或 Codex SDK（通过 CTI_RUNTIME 配置）
 Claude Code / Codex → 读写你的代码库
@@ -22,10 +22,10 @@ Claude Code / Codex → 读写你的代码库
 
 ## 功能特点
 
-- **五大 IM 平台** — Telegram、Discord、飞书、QQ、微信，可任意组合启用
+- **飞书/Lark 桥接** — owner 级聊天、固定 lark 工作区、会话和命令控制
 - **交互式配置** — 引导式向导逐步收集 token，附带详细获取说明
-- **权限控制** — 工具调用需要在聊天中通过内联按钮（Telegram/Discord）或文本 `/perm` 命令 / 快捷 `1/2/3` 回复（飞书/QQ/微信）明确批准
-- **流式预览** — 实时查看 Claude 的输出（Telegram 和 Discord 支持）
+- **权限控制** — 工具调用需要通过飞书卡片、文本 `/perm` 命令或快捷 `1/2/3` 回复明确批准
+- **Dreaming 记忆** — 可选按 owner 的 nightly README/TODO 更新，来源于聊天日志
 - **会话持久化** — 对话在守护进程重启后保留
 - **密钥保护** — token 以 `chmod 600` 存储，日志中自动脱敏
 - **无需编写代码** — 安装 Skill 后运行 `/claude-to-im setup`，或直接对 Codex 说 `claude-to-im setup`
@@ -54,10 +54,10 @@ npx skills add op7418/Claude-to-IM-skill
 /claude-to-im setup
 ```
 
-如果你主要想接微信，也可以直接说：
+如果你主要想接飞书，也可以直接说：
 
 ```text
-帮我接微信
+帮我接飞书
 ```
 
 #### 备选：直接克隆到 Claude Code Skills 目录
@@ -99,15 +99,16 @@ bash ~/code/Claude-to-IM-skill/scripts/install-codex.sh --link
 claude-to-im setup
 ```
 
-如果你主要想接微信，也可以直接说：
+如果你主要想接飞书，也可以直接说：
 
 ```text
-帮我接微信桥接
+帮我接飞书桥接
 ```
 
 #### 备选：直接克隆到 Codex skills 目录
 
 ```bash
+git clone https://github.com/op7418/Claude-to-IM.git ~/.codex/skills/Claude-to-IM
 git clone https://github.com/op7418/Claude-to-IM-skill.git ~/.codex/skills/claude-to-im
 cd ~/.codex/skills/claude-to-im
 npm install
@@ -118,7 +119,7 @@ npm run build
 
 **Claude Code：** 启动新会话，输入 `/` 应能看到 `claude-to-im`。也可以直接问 Claude："What skills are available?"
 
-**Codex：** 启动新会话，说 `claude-to-im setup`、`start bridge` 或 `帮我接微信桥接`。
+**Codex：** 启动新会话，说 `claude-to-im setup`、`start bridge` 或 `帮我接飞书桥接`。
 
 ## 更新 Skill
 
@@ -191,8 +192,8 @@ claude-to-im setup
 
 向导会引导你完成以下步骤：
 
-1. **选择渠道** — 选择 Telegram、Discord、飞书、QQ、微信，或任意组合
-2. **输入凭据** — 向导会详细说明如何获取每个 token、需要开启哪些设置、授予哪些权限
+1. **配置飞书/Lark** — 应用凭据、域名、命令管理员和事件权限
+2. **输入凭据** — 向导会详细说明如何获取每个值、需要开启哪些设置、授予哪些权限
 3. **设置默认值** — 工作目录、模型、模式
 4. **验证** — 立即通过平台 API 验证 token 有效性
 
@@ -216,7 +217,7 @@ start bridge
 
 打开 IM 应用，给你的机器人发消息，Claude Code / Codex 会通过桥接回复。
 
-当 Claude 需要使用工具（编辑文件、运行命令）时，聊天中会弹出带有 **允许** / **拒绝** 按钮的权限请求（Telegram/Discord），或文本 `/perm` 命令提示 / 快捷 `1/2/3` 回复（飞书/QQ/微信）。
+当 Claude 需要使用工具（编辑文件、运行命令）时，聊天中会出现飞书权限卡片，也可以使用文本 `/perm` 命令或快捷 `1/2/3` 回复。
 
 ## 命令列表
 
@@ -237,20 +238,6 @@ start bridge
 
 `setup` 向导会在每一步提供内联指引，以下是概要：
 
-### Telegram
-
-1. 在 Telegram 中搜索 `@BotFather` → 发送 `/newbot` → 按提示操作
-2. 复制 bot token（格式：`123456789:AABbCc...`）
-3. 建议：`/setprivacy` → Disable（用于群组）
-4. 获取 User ID：给 `@userinfobot` 发消息
-
-### Discord
-
-1. 前往 [Discord 开发者门户](https://discord.com/developers/applications) → 新建应用
-2. Bot 标签页 → Reset Token → 复制 token
-3. 在 Privileged Gateway Intents 下开启 **Message Content Intent**
-4. OAuth2 → URL Generator → scope 选 `bot` → 权限选 Send Messages、Read Message History、View Channels → 复制邀请链接
-
 ### 飞书 / Lark
 
 1. 前往[飞书开放平台](https://open.feishu.cn/app)（或 [Lark](https://open.larksuite.com/app)）
@@ -260,35 +247,6 @@ start bridge
 5. **事件与回调**：选择**长连接**作为事件订阅方式 → 添加 `im.message.receive_v1` 事件
 6. **发布**：进入"版本管理与发布" → 创建版本 → 提交审核 → 在管理后台审核通过
 7. **注意**：版本审核通过并发布后机器人才能使用
-
-### QQ
-
-> QQ 目前仅支持 **C2C 私聊**（沙箱接入）。不支持群聊/频道、内联权限按钮、流式预览。权限确认使用文本 `/perm ...` 命令。仅支持图片入站（不支持图片回复）。
-
-1. 前往 [QQ 机器人 OpenClaw](https://q.qq.com/qqbot/openclaw)
-2. 创建或选择已有 QQ 机器人 → 获取 **App ID** 和 **App Secret**（仅需这两个必填项）
-3. 配置沙箱接入，用 QQ 扫码添加机器人
-4. `CTI_QQ_ALLOWED_USERS` 填写 `user_openid`（不是 QQ 号）— 可先留空
-5. 如果底层 provider 不支持图片输入，设置 `CTI_QQ_IMAGE_ENABLED=false`
-
-### 微信 / Weixin
-
-> 微信当前采用扫码登录、单账号模式、文本权限确认，不支持流式预览。
-
-1. 在已安装的 Skill 目录里运行本地扫码工具：
-   - Claude Code 默认安装：`cd ~/.claude/skills/claude-to-im && npm run weixin:login`
-   - Codex 默认安装：`cd ~/.codex/skills/claude-to-im && npm run weixin:login`
-2. 工具会生成 `~/.claude-to-im/runtime/weixin-login.html`，并尽量自动用浏览器打开
-3. 用微信扫码并在手机上确认
-4. 成功后，账号会保存到 `~/.claude-to-im/data/weixin-accounts.json`
-5. 再次运行扫码工具，会替换当前已绑定的微信账号
-
-补充说明：
-
-- `CTI_WEIXIN_MEDIA_ENABLED` 只控制图片 / 文件 / 视频的入站下载
-- 语音消息只使用微信自带的语音转文字结果
-- 如果微信没有提供 `voice_item.text`，桥会直接报错，不会自行下载或转写原始语音
-- 权限确认使用文本 `/perm ...` 命令或快捷 `1/2/3` 回复
 
 ## 架构
 

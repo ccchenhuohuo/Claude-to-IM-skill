@@ -13,28 +13,33 @@ import type {
   BridgeSession,
   BridgeMessage,
   BridgeApiProvider,
+  DreamingState,
   AuditLogInput,
+  OwnerChatLogEntry,
+  OwnerChatLogQuery,
   PermissionLinkInput,
   PermissionLinkRecord,
   OutboundRefInput,
   UpsertChannelBindingInput,
-} from 'claude-to-im/src/lib/bridge/host.js';
-import type { ChannelBinding, ChannelType } from 'claude-to-im/src/lib/bridge/types.js';
+} from 'claude-to-im/host';
+import type { BridgeOwner, ChannelAddress, ChannelBinding, ChannelType } from 'claude-to-im/types';
 import { CTI_HOME } from './config.js';
 
 const DATA_DIR = path.join(CTI_HOME, 'data');
 const MESSAGES_DIR = path.join(DATA_DIR, 'messages');
+const LARK_DIR = path.join(CTI_HOME, 'lark');
 
 // ── Helpers ──
 
 function ensureDir(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 }
 
 function atomicWrite(filePath: string, data: string): void {
   const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, data, 'utf-8');
+  fs.writeFileSync(tmp, data, { encoding: 'utf-8', mode: 0o600 });
   fs.renameSync(tmp, filePath);
+  fs.chmodSync(filePath, 0o600);
 }
 
 function readJson<T>(filePath: string, fallback: T): T {
@@ -50,12 +55,46 @@ function writeJson(filePath: string, data: unknown): void {
   atomicWrite(filePath, JSON.stringify(data, null, 2));
 }
 
+function appendPrivateLine(filePath: string, line: string): void {
+  const fd = fs.openSync(filePath, 'a', 0o600);
+  try {
+    fs.writeSync(fd, line);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.chmodSync(filePath, 0o600);
+}
+
 function uuid(): string {
   return crypto.randomUUID();
 }
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function domainFromSettings(settings: Map<string, string>): 'feishu' | 'lark' {
+  return settings.get('bridge_feishu_domain') === 'lark' ? 'lark' : 'feishu';
+}
+
+function ownerKeyFor(address: ChannelAddress, chatType: BridgeOwner['chatType'], settings: Map<string, string>): string {
+  const domain = domainFromSettings(settings);
+  return `feishu:${domain}:${chatType}:${address.chatId}`;
+}
+
+function ownerSlug(ownerKey: string): string {
+  const hash = crypto.createHash('sha256').update(ownerKey).digest('hex').slice(0, 16);
+  const readable = ownerKey
+    .replace(/^feishu:/, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `${readable || 'owner'}-${hash}`;
+}
+
+function writeIfMissing(filePath: string, data: string): void {
+  if (fs.existsSync(filePath)) return;
+  fs.writeFileSync(filePath, data, { encoding: 'utf-8', mode: 0o600 });
 }
 
 // ── Lock entry ──
@@ -70,10 +109,12 @@ interface LockEntry {
 
 export class JsonFileStore implements BridgeStore {
   private settings: Map<string, string>;
+  private owners = new Map<string, BridgeOwner>();
   private sessions = new Map<string, BridgeSession>();
   private bindings = new Map<string, ChannelBinding>();
   private messages = new Map<string, BridgeMessage[]>();
   private permissionLinks = new Map<string, PermissionLinkRecord>();
+  private dreamingStates = new Map<string, DreamingState>();
   private offsets = new Map<string, string>();
   private dedupKeys = new Map<string, number>();
   private locks = new Map<string, LockEntry>();
@@ -83,12 +124,22 @@ export class JsonFileStore implements BridgeStore {
     this.settings = settingsMap;
     ensureDir(DATA_DIR);
     ensureDir(MESSAGES_DIR);
+    ensureDir(LARK_DIR);
     this.loadAll();
   }
 
   // ── Persistence ──
 
   private loadAll(): void {
+    // Owners
+    const owners = readJson<Record<string, BridgeOwner>>(
+      path.join(DATA_DIR, 'owners.json'),
+      {},
+    );
+    for (const [key, owner] of Object.entries(owners)) {
+      this.owners.set(key, owner);
+    }
+
     // Sessions
     const sessions = readJson<Record<string, BridgeSession>>(
       path.join(DATA_DIR, 'sessions.json'),
@@ -114,6 +165,14 @@ export class JsonFileStore implements BridgeStore {
     );
     for (const [id, p] of Object.entries(perms)) {
       this.permissionLinks.set(id, p);
+    }
+
+    const dreamingStates = readJson<Record<string, DreamingState>>(
+      path.join(DATA_DIR, 'dreaming-state.json'),
+      {},
+    );
+    for (const [key, state] of Object.entries(dreamingStates)) {
+      this.dreamingStates.set(key, state);
     }
 
     // Offsets
@@ -145,6 +204,13 @@ export class JsonFileStore implements BridgeStore {
     );
   }
 
+  private persistOwners(): void {
+    writeJson(
+      path.join(DATA_DIR, 'owners.json'),
+      Object.fromEntries(this.owners),
+    );
+  }
+
   private persistBindings(): void {
     writeJson(
       path.join(DATA_DIR, 'bindings.json'),
@@ -156,6 +222,13 @@ export class JsonFileStore implements BridgeStore {
     writeJson(
       path.join(DATA_DIR, 'permissions.json'),
       Object.fromEntries(this.permissionLinks),
+    );
+  }
+
+  private persistDreamingStates(): void {
+    writeJson(
+      path.join(DATA_DIR, 'dreaming-state.json'),
+      Object.fromEntries(this.dreamingStates),
     );
   }
 
@@ -200,6 +273,181 @@ export class JsonFileStore implements BridgeStore {
     return this.settings.get(key) ?? null;
   }
 
+  // ── Feishu Owners ──
+
+  getOrCreateOwner(address: ChannelAddress, chatType: BridgeOwner['chatType'] = 'unknown'): BridgeOwner {
+    const normalizedChatType = chatType || 'unknown';
+    const key = ownerKeyFor(address, normalizedChatType, this.settings);
+    const existing = this.owners.get(key);
+    if (existing) {
+      const updated: BridgeOwner = {
+        ...existing,
+        displayName: address.displayName || existing.displayName,
+        updatedAt: now(),
+      };
+      this.owners.set(key, updated);
+      this.persistOwners();
+      return updated;
+    }
+
+    const owner: BridgeOwner = {
+      ownerKey: key,
+      channelType: 'feishu',
+      chatId: address.chatId,
+      chatType: normalizedChatType,
+      displayName: address.displayName,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    this.owners.set(key, owner);
+    this.persistOwners();
+    this.getOwnerWorkspace(key);
+    return owner;
+  }
+
+  listOwners(): BridgeOwner[] {
+    return Array.from(this.owners.values())
+      .sort((a, b) => {
+        const aTime = Date.parse(a.updatedAt || a.createdAt || '');
+        const bTime = Date.parse(b.updatedAt || b.createdAt || '');
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+      });
+  }
+
+  getOwnerWorkspace(ownerKey: string): string {
+    const owner = this.owners.get(ownerKey);
+    const dir = path.join(LARK_DIR, ownerSlug(ownerKey));
+    ensureDir(dir);
+    ensureDir(path.join(dir, 'uploads'));
+    ensureDir(path.join(dir, '.cti'));
+    ensureDir(path.join(dir, '.cti', 'chat-logs'));
+    ensureDir(path.join(dir, '.cti', 'dreaming'));
+    ensureDir(path.join(dir, '.cti', 'messages'));
+    writeIfMissing(path.join(dir, 'README.md'), `# ${owner?.displayName || owner?.chatId || 'Feishu Chat'}\n\n`);
+    writeIfMissing(path.join(dir, 'TODO.md'), '# TODO\n\n');
+    writeJson(path.join(dir, '.cti', 'owner.json'), owner || { ownerKey });
+    return dir;
+  }
+
+  listSessionsByOwner(ownerKey: string): BridgeSession[] {
+    return Array.from(this.sessions.values())
+      .filter((session) => session.ownerKey === ownerKey)
+      .sort((a, b) => {
+        const aTime = Date.parse(a.lastActiveAt || a.updatedAt || a.createdAt || '');
+        const bTime = Date.parse(b.lastActiveAt || b.updatedAt || b.createdAt || '');
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+      });
+  }
+
+  createSessionForOwner(ownerKey: string, input: {
+    title?: string;
+    titleStatus?: BridgeSession['titleStatus'];
+    model: string;
+    systemPrompt?: string;
+    mode?: 'code' | 'plan' | 'ask';
+  }): BridgeSession {
+    const createdAt = now();
+    const session: BridgeSession = {
+      id: uuid(),
+      ownerKey,
+      title: input.title || '新话题',
+      titleStatus: input.titleStatus || 'fallback',
+      generation: 1,
+      working_directory: this.getOwnerWorkspace(ownerKey),
+      model: input.model,
+      mode: input.mode || 'code',
+      system_prompt: input.systemPrompt,
+      createdAt,
+      updatedAt: createdAt,
+      lastActiveAt: createdAt,
+    };
+    this.sessions.set(session.id, session);
+    this.persistSessions();
+    return session;
+  }
+
+  updateSessionTitle(sessionId: string, title: string, titleStatus: BridgeSession['titleStatus'] = 'manual'): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.sessions.set(sessionId, {
+      ...session,
+      title,
+      titleStatus,
+      updatedAt: now(),
+    });
+    this.persistSessions();
+  }
+
+  bumpSessionGeneration(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    if (!session) return 0;
+    const generation = (session.generation || 0) + 1;
+    this.sessions.set(sessionId, {
+      ...session,
+      generation,
+      updatedAt: now(),
+    });
+    this.persistSessions();
+    return generation;
+  }
+
+  appendOwnerChatLog(entry: OwnerChatLogEntry): void {
+    const dir = path.join(this.getOwnerWorkspace(entry.ownerKey), '.cti', 'chat-logs');
+    ensureDir(dir);
+    const day = entry.createdAt.slice(0, 10);
+    const filePath = path.join(dir, `${day}.jsonl`);
+    appendPrivateLine(filePath, `${JSON.stringify(entry)}\n`);
+  }
+
+  getOwnerChatLogs(ownerKey: string, query: OwnerChatLogQuery = {}): OwnerChatLogEntry[] {
+    const dir = path.join(this.getOwnerWorkspace(ownerKey), '.cti', 'chat-logs');
+    if (!fs.existsSync(dir)) return [];
+    const since = query.since ? Date.parse(query.since) : -Infinity;
+    const until = query.until ? Date.parse(query.until) : Infinity;
+    const entries: OwnerChatLogEntry[] = [];
+    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).sort()) {
+      const filePath = path.join(dir, name);
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as OwnerChatLogEntry;
+          const ts = Date.parse(entry.createdAt);
+          if (Number.isFinite(ts) && ts >= since && ts <= until) {
+            entries.push(entry);
+          }
+        } catch { /* ignore corrupt log lines */ }
+      }
+    }
+    entries.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    if (!query.maxChars || query.maxChars <= 0) return entries;
+
+    const selected: OwnerChatLogEntry[] = [];
+    let total = 0;
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      total += entry.text.length;
+      if (total > query.maxChars && selected.length > 0) break;
+      selected.push(entry);
+    }
+    return selected.reverse();
+  }
+
+  getDreamingState(ownerKey: string): DreamingState | null {
+    return this.dreamingStates.get(ownerKey) ?? null;
+  }
+
+  updateDreamingState(ownerKey: string, patch: Partial<DreamingState>): DreamingState {
+    const state: DreamingState = {
+      ownerKey,
+      ...(this.dreamingStates.get(ownerKey) ?? {}),
+      ...patch,
+    };
+    this.dreamingStates.set(ownerKey, state);
+    this.persistDreamingStates();
+    return state;
+  }
+
   // ── Channel Bindings ──
 
   getChannelBinding(channelType: string, chatId: string): ChannelBinding | null {
@@ -212,9 +460,14 @@ export class JsonFileStore implements BridgeStore {
     if (existing) {
       const updated: ChannelBinding = {
         ...existing,
+        ownerKey: data.ownerKey ?? existing.ownerKey,
         codepilotSessionId: data.codepilotSessionId,
+        sdkSessionId: data.sdkSessionId ?? existing.sdkSessionId,
         workingDirectory: data.workingDirectory,
         model: data.model,
+        mode: (data.mode as ChannelBinding['mode']) ?? existing.mode,
+        generation: data.generation ?? existing.generation,
+        active: true,
         updatedAt: now(),
       };
       this.bindings.set(key, updated);
@@ -225,11 +478,15 @@ export class JsonFileStore implements BridgeStore {
       id: uuid(),
       channelType: data.channelType,
       chatId: data.chatId,
+      ownerKey: data.ownerKey,
       codepilotSessionId: data.codepilotSessionId,
-      sdkSessionId: '',
+      sdkSessionId: data.sdkSessionId || '',
       workingDirectory: data.workingDirectory,
       model: data.model,
-      mode: (this.settings.get('bridge_default_mode') as 'code' | 'plan' | 'ask') || 'code',
+      mode: (data.mode as 'code' | 'plan' | 'ask')
+        || (this.settings.get('bridge_default_mode') as 'code' | 'plan' | 'ask')
+        || 'code',
+      generation: data.generation ?? 1,
       active: true,
       createdAt: now(),
       updatedAt: now(),
@@ -262,17 +519,25 @@ export class JsonFileStore implements BridgeStore {
   }
 
   createSession(
-    _name: string,
+    name: string,
     model: string,
     systemPrompt?: string,
     cwd?: string,
-    _mode?: string,
+    mode?: string,
   ): BridgeSession {
+    const createdAt = now();
     const session: BridgeSession = {
       id: uuid(),
       working_directory: cwd || this.settings.get('bridge_default_work_dir') || process.cwd(),
       model,
+      title: name,
+      titleStatus: 'fallback',
+      generation: 1,
+      mode: (mode as BridgeSession['mode']) || 'code',
       system_prompt: systemPrompt,
+      createdAt,
+      updatedAt: createdAt,
+      lastActiveAt: createdAt,
     };
     this.sessions.set(session.id, session);
     this.persistSessions();
@@ -283,6 +548,7 @@ export class JsonFileStore implements BridgeStore {
     const s = this.sessions.get(sessionId);
     if (s) {
       s.provider_id = providerId;
+      s.updatedAt = now();
       this.persistSessions();
     }
   }
@@ -293,6 +559,12 @@ export class JsonFileStore implements BridgeStore {
     const msgs = this.loadMessages(sessionId);
     msgs.push({ role, content });
     this.persistMessages(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActiveAt = now();
+      session.updatedAt = session.lastActiveAt;
+      this.persistSessions();
+    }
   }
 
   getMessages(sessionId: string, opts?: { limit?: number }): { messages: BridgeMessage[] } {
@@ -343,7 +615,8 @@ export class JsonFileStore implements BridgeStore {
     const s = this.sessions.get(sessionId);
     if (s) {
       // Store sdkSessionId on the session object
-      (s as unknown as Record<string, unknown>)['sdk_session_id'] = sdkSessionId;
+      s.sdk_session_id = sdkSessionId;
+      s.updatedAt = now();
       this.persistSessions();
     }
     // Also update any bindings that reference this session
@@ -359,6 +632,16 @@ export class JsonFileStore implements BridgeStore {
     const s = this.sessions.get(sessionId);
     if (s) {
       s.model = model;
+      s.updatedAt = now();
+      this.persistSessions();
+    }
+  }
+
+  updateSessionMode(sessionId: string, mode: 'code' | 'plan' | 'ask'): void {
+    const s = this.sessions.get(sessionId);
+    if (s) {
+      s.mode = mode;
+      s.updatedAt = now();
       this.persistSessions();
     }
   }
@@ -429,10 +712,16 @@ export class JsonFileStore implements BridgeStore {
   insertPermissionLink(link: PermissionLinkInput): void {
     const record: PermissionLinkRecord = {
       permissionRequestId: link.permissionRequestId,
+      channelType: link.channelType,
       chatId: link.chatId,
       messageId: link.messageId,
+      sessionId: link.sessionId,
+      toolName: link.toolName,
+      toolInput: link.toolInput,
       resolved: false,
       suggestions: link.suggestions,
+      createdAt: now(),
+      expiresAt: link.expiresAt,
     };
     this.permissionLinks.set(link.permissionRequestId, record);
     this.persistPermissions();
@@ -446,17 +735,28 @@ export class JsonFileStore implements BridgeStore {
     const link = this.permissionLinks.get(permissionRequestId);
     if (!link || link.resolved) return false;
     link.resolved = true;
+    link.resolvedAt = now();
     this.persistPermissions();
     return true;
   }
 
-  listPendingPermissionLinksByChat(chatId: string): PermissionLinkRecord[] {
+  listPendingPermissionLinksByChat(chatId: string, channelType?: string): PermissionLinkRecord[] {
     const result: PermissionLinkRecord[] = [];
+    let changed = false;
+    const nowMs = Date.now();
     for (const link of this.permissionLinks.values()) {
-      if (link.chatId === chatId && !link.resolved) {
+      if (link.resolved) continue;
+      if (link.expiresAt && Date.parse(link.expiresAt) <= nowMs) {
+        link.resolved = true;
+        link.resolvedAt = now();
+        changed = true;
+        continue;
+      }
+      if (link.chatId === chatId && (!channelType || !link.channelType || link.channelType === channelType)) {
         result.push(link);
       }
     }
+    if (changed) this.persistPermissions();
     return result;
   }
 

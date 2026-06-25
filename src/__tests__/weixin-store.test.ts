@@ -77,6 +77,8 @@ describe('weixin-store', () => {
 
     assert.equal(getWeixinContextToken('wx-bot-2', 'peer-a'), 'ctx-a');
     assert.equal(getWeixinContextToken('wx-bot-2', 'peer-b'), 'ctx-b');
+    assert.equal(fs.statSync(ACCOUNTS_PATH).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(TOKENS_PATH).mode & 0o777, 0o600);
 
     assert.equal(deleteWeixinAccount('wx-bot-2'), true);
     assert.equal(getWeixinContextToken('wx-bot-2', 'peer-a'), undefined);

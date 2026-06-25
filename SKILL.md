@@ -1,7 +1,7 @@
 ---
 name: claude-to-im
 description: |
-  Bridge THIS Claude Code or Codex session to Telegram, Discord, Feishu/Lark, QQ, or WeChat so the
+  Bridge THIS Claude Code or Codex session to Feishu/Lark so the
   user can chat with Claude from their phone. Use for: setting up, starting, stopping,
   or diagnosing the claude-to-im bridge daemon; forwarding Claude replies to a messaging
   app; any phrase like "claude-to-im", "bridge", "消息推送", "消息转发", "桥接",
@@ -35,7 +35,7 @@ Parse the user's intent from `$ARGUMENTS` into one of these subcommands:
 
 | User says (examples) | Subcommand |
 |---|---|
-| `setup`, `configure`, `配置`, `我想在飞书上用 Claude`, `帮我连接 Telegram`, `帮我接微信` | setup |
+| `setup`, `configure`, `配置`, `我想在飞书上用 Claude`, `连上飞书`, `连接 Lark` | setup |
 | `start`, `start bridge`, `启动`, `启动桥接` | start |
 | `stop`, `stop bridge`, `停止`, `停止桥接` | stop |
 | `status`, `bridge status`, `状态`, `运行状态`, `怎么看桥接的运行状态` | status |
@@ -75,42 +75,19 @@ Run an interactive setup wizard. This subcommand requires `AskUserQuestion`. If 
 
 When AskUserQuestion IS available, collect input **one field at a time**. After each answer, confirm the value back to the user (masking secrets to last 4 chars only) before moving to the next question.
 
-**Step 1 — Choose channels**
+**Step 1 — Feishu/Lark channel**
 
-Ask which channels to enable (telegram, discord, feishu, qq, weixin). Accept comma-separated input. Briefly describe each:
-- **telegram** — Best for personal use. Streaming preview, inline permission buttons.
-- **discord** — Good for team use. Server/channel/user-level access control.
-- **feishu** (Lark) — For Feishu/Lark teams. Streaming cards, tool progress, inline permission buttons.
-- **qq** — QQ C2C private chat only. No inline permission buttons, no streaming preview. Permissions use text `/perm ...` commands.
-- **weixin** — WeChat QR login. Single linked account only; a new login replaces the previous one. No inline permission buttons, no streaming preview. Permissions use text `/perm ...` commands or quick `1/2/3` replies. Voice messages only use WeChat's own speech-to-text text; raw voice audio is not transcribed by the bridge.
+Set `CTI_ENABLED_CHANNELS=feishu`. This build is Feishu/Lark-only. Do not offer Telegram, Discord, QQ, or Weixin during setup.
 
-**Step 2 — Collect tokens per channel**
+**Step 2 — Collect Feishu/Lark credentials**
 
-For each enabled channel, collect one credential at a time. Tell the user where to find each value in one sentence. Only show the full guide section (from `SKILL_DIR/references/setup-guides.md`) if the user asks for help or says they don't know how:
+Collect one credential at a time. Tell the user where to find each value in one sentence. Only show the full guide section (from `SKILL_DIR/references/setup-guides.md`) if the user asks for help or says they don't know how:
 
-- **Telegram**: Bot Token → confirm (masked) → Chat ID (see guide for how to get it) → confirm → Allowed User IDs (optional). **Important:** At least one of Chat ID or Allowed User IDs must be set, otherwise the bot will reject all messages.
-- **Discord**: Bot Token → confirm (masked) → Allowed User IDs → Allowed Channel IDs (optional) → Allowed Guild IDs (optional). **Important:** At least one of Allowed User IDs or Allowed Channel IDs must be set, otherwise the bot will reject all messages (default-deny).
-- **Feishu**: App ID → confirm → App Secret → confirm (masked) → Domain (optional) → Allowed User IDs (optional). After collecting credentials, explain the two-phase setup the user must complete:
+- **Feishu**: App ID → confirm → App Secret → confirm (masked) → Domain (optional: feishu/lark) → Command Admin open_ids (optional). After collecting credentials, explain the two-phase setup the user must complete:
   - **Phase 1** (before starting bridge): (A) batch-add permissions, (B) enable bot capability, (C) publish first version + admin approve. This makes permissions and bot effective.
   - **Phase 2** (requires running bridge): (D) run `/claude-to-im start`, (E) configure events (`im.message.receive_v1`) and callback (`card.action.trigger`) with long connection mode, (F) publish second version + admin approve.
   - **Why two phases:** Feishu validates WebSocket connection when saving event subscription — if the bridge isn't running, saving will fail. The bridge needs published permissions to connect.
   - Keep this to a short checklist — show the full guide only if asked.
-- **QQ**: Collect two required fields, then optional ones:
-  1. QQ App ID (required) → confirm
-  2. QQ App Secret (required) → confirm (masked)
-  - Tell the user: these two values can be found at https://q.qq.com/qqbot/openclaw
-  3. Allowed User OpenIDs (optional, press Enter to skip) — note: this is `user_openid`, NOT QQ number. If the user doesn't have openid yet, they can leave it empty.
-  4. Image Enabled (optional, default true, press Enter to skip) — if the underlying provider doesn't support image input, set to false
-  5. Max Image Size MB (optional, default 20, press Enter to skip)
-  - Remind user: QQ first version only supports C2C private chat sandbox access. No group/channel support, no inline buttons, no streaming preview.
-- **Weixin**: Do not ask for a static token. Instead:
-  1. Tell the user this channel uses QR login, not manual credential entry.
-  2. Run `cd SKILL_DIR && npm run weixin:login`
-  3. The helper writes `~/.claude-to-im/runtime/weixin-login.html` and tries to open it automatically in the local browser.
-  4. If auto-open fails, tell the user to open that HTML file manually and scan the QR code with WeChat.
-  5. Wait for the helper to report success, then confirm that the linked account was saved locally.
-  - Explain briefly: the linked Weixin account is stored in `~/.claude-to-im/data/weixin-accounts.json`. Running the helper again replaces the previously linked account.
-  - Explain briefly: `CTI_WEIXIN_MEDIA_ENABLED` only controls inbound image/file/video downloads. For voice messages, the bridge only accepts the text returned by WeChat's built-in speech-to-text. If WeChat does not provide a transcript, the bridge replies with an error instead of downloading/transcribing raw audio.
 
 **Step 3 — General settings**
 
@@ -122,6 +99,7 @@ Ask for runtime, default working directory, model, and mode:
 - **Working Directory**: default `$CWD`
 - **Model** (optional): Leave blank to inherit the runtime's own default model. If the user wants to override, ask them to enter a model name. Do NOT hardcode or suggest specific model names — the available models change over time.
 - **Mode**: `code` (default), `plan`, `ask`
+- **Dreaming** (optional): `CTI_DREAMING_ENABLED`, time (default `01:00`), timezone (default `Asia/Shanghai`), model, max log chars, catchup days.
 
 **Step 4 — Write config and validate**
 
@@ -130,7 +108,7 @@ Ask for runtime, default working directory, model, and mode:
 3. Use Bash to create directory structure: `mkdir -p ~/.claude-to-im/{data,logs,runtime,data/messages}`
 4. Use Write to create `~/.claude-to-im/config.env` with all settings in KEY=VALUE format
 5. Use Bash to set permissions: `chmod 600 ~/.claude-to-im/config.env`
-6. Validate tokens — read `SKILL_DIR/references/token-validation.md` for the exact commands and expected responses for each platform. This catches typos and wrong credentials before the user tries to start the daemon. For Weixin, a successful QR login already counts as validation.
+6. Validate Feishu credentials — read `SKILL_DIR/references/token-validation.md` for the exact command and expected response. This catches typos and wrong credentials before the user tries to start the daemon.
 7. Report results with a summary table. If any validation fails, explain what might be wrong and how to fix it.
 8. On success, tell the user: "Setup complete! Run `/claude-to-im start` to start the bridge."
 
@@ -167,18 +145,15 @@ Run: `bash "SKILL_DIR/scripts/daemon.sh" logs N`
 6. Re-validate any changed tokens
 7. Remind user: "Run `/claude-to-im stop` then `/claude-to-im start` to apply the changes."
 
-If the user wants to switch Weixin accounts during `reconfigure`, run `cd SKILL_DIR && npm run weixin:login` again. Each successful scan replaces the previously linked local account.
-
 ### `doctor`
 
 Run: `bash "SKILL_DIR/scripts/doctor.sh"`
 
 Show results and suggest fixes for any failures. Common fixes:
-- SDK cli.js missing → `cd SKILL_DIR && npm install`
+- Claude SDK package missing → `cd SKILL_DIR && npm install`
 - dist/daemon.mjs stale → `cd SKILL_DIR && npm run build`
 - Config missing → run `setup`
-- Weixin account missing / expired → `cd SKILL_DIR && npm run weixin:login`
-- Weixin voice message reports missing speech-to-text → enable WeChat's own voice transcription and resend; the bridge does not transcribe raw voice audio itself
+- Feishu app permission errors → add required scopes/callbacks, publish, approve, then restart bridge
 
 For more complex issues (messages not received, permission timeouts, high memory, stale PID files), read `SKILL_DIR/references/troubleshooting.md` for detailed diagnosis steps.
 

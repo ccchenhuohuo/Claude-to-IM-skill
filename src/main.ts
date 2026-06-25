@@ -8,18 +8,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-import { initBridgeContext } from 'claude-to-im/src/lib/bridge/context.js';
-import * as bridgeManager from 'claude-to-im/src/lib/bridge/bridge-manager.js';
-// Side-effect import to trigger adapter self-registration
-import 'claude-to-im/src/lib/bridge/adapters/index.js';
-import './adapters/weixin-adapter.js';
+import { initBridgeContext } from 'claude-to-im/context';
+import * as bridgeManager from 'claude-to-im/bridge-manager';
+// Side-effect import to trigger Feishu adapter self-registration
+import 'claude-to-im/adapters';
 
-import type { LLMProvider } from 'claude-to-im/src/lib/bridge/host.js';
+import type { LLMProvider } from 'claude-to-im/host';
 import { loadConfig, configToSettings, CTI_HOME } from './config.js';
 import type { Config } from './config.js';
 import { JsonFileStore } from './store.js';
 import { SDKLLMProvider, resolveClaudeCliPath, preflightCheck } from './llm-provider.js';
 import { PendingPermissions } from './permission-gateway.js';
+import { startDreamingScheduler } from './dreaming.js';
 import { setupLogger } from './logger.js';
 
 const RUNTIME_DIR = path.join(CTI_HOME, 'runtime');
@@ -127,9 +127,17 @@ async function main(): Promise<void> {
   const pendingPerms = new PendingPermissions();
   const llm = await resolveProvider(config, pendingPerms);
   console.log(`[claude-to-im] Runtime: ${config.runtime}`);
+  const dreamingScheduler = startDreamingScheduler(store, llm, {
+    enabled: config.dreamingEnabled,
+    time: config.dreamingTime,
+    timezone: config.dreamingTimezone,
+    model: config.dreamingModel,
+    maxLogChars: config.dreamingMaxLogChars,
+    catchupDays: config.dreamingCatchupDays,
+  });
 
   const gateway = {
-    resolvePendingPermission: (id: string, resolution: { behavior: 'allow' | 'deny'; message?: string }) =>
+    resolvePendingPermission: (id: string, resolution: { behavior: 'allow' | 'deny'; message?: string; updatedPermissions?: unknown[] }) =>
       pendingPerms.resolve(id, resolution),
   };
 
@@ -167,6 +175,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     const reason = signal ? `signal: ${signal}` : 'shutdown requested';
     console.log(`[claude-to-im] Shutting down (${reason})...`);
+    dreamingScheduler?.stop();
     pendingPerms.denyAll();
     await bridgeManager.stop();
     writeStatus({ running: false, lastExitReason: reason });
